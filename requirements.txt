@@ -1,0 +1,6 @@
+
+streamlit
+pyresparser
+pdfminer.six
+spacy
+nltk
