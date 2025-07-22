@@ -6,6 +6,194 @@ import spacy
 import fitz  # PyMuPDF for better PDF extraction (fitz is the module name for PyMuPDF)
 from difflib import SequenceMatcher
 import docx  # For .docx support
+from io import BytesIO  # For PDF generation
+import base64
+import hashlib
+
+# --- Page config & theme ---
+st.set_page_config(page_title="AI Resume Analyzer", page_icon="📄", layout="wide")
+
+# Global styling to modernize the look & feel
+st.markdown(
+    """
+    <style>
+      /* Background - Professional, neutral */
+      .stApp { background: linear-gradient(180deg, #f8fafc 0%, #f3f6fa 60%, #ffffff 100%); }
+      .stApp:before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .15;
+        background-image: radial-gradient(#e6edf6 1px, transparent 1px); background-size: 20px 20px; }
+
+      /* Headings */
+      h1, h2, h3 { font-family: 'Segoe UI', Roboto, Arial, sans-serif; }
+      h1 { color: #2563eb; letter-spacing: .2px; font-weight: 800; }
+      h2, h3 { color: #0f172a; font-weight: 700; }
+
+      /* Hero - Modern Dark Theme */
+      .hero { padding: 20px 24px; border-radius: 12px; margin: 4px 0 16px 0;
+              background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+              border: 1px solid #667eea; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+      .hero .title { font-size: 26px; font-weight: 800; color:#ffffff; }
+      .hero .subtitle { color:#e2e8f0; }
+
+      /* Cards */
+      .card {
+        padding: 1.25rem 1.5rem;
+        border-radius: 14px;
+        border: 1px solid #e6edf6;
+        background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+        box-shadow: 0 6px 18px rgba(2, 8, 23, 0.06);
+        margin-bottom: 1rem;
+      }
+      .card:hover { box-shadow: 0 10px 28px rgba(2, 8, 23, .12); transform: translateY(-1px); transition: all .2s ease; }
+
+      /* Buttons - Modern Dark Theme */
+      .stButton > button, button[data-testid="baseButton-secondary"] {
+        background: #2563eb !important; color: white !important; border: none !important; border-radius: 10px !important; padding: 0.75rem 1.25rem !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35) !important; font-weight: 700 !important; transition: all 0.25s ease !important;
+        border-left: 4px solid #7c3aed !important;
+      }
+      .stDownloadButton > button, button[data-testid="baseButton-secondary"] {
+        background: #4a5568 !important; color: white !important; border: none !important; border-radius: 8px !important; padding: 0.75rem 1.25rem !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important; font-weight: 600 !important; transition: all 0.3s ease !important;
+        border-left: 4px solid #805ad5 !important;
+      }
+      /* Primary CTA buttons */
+      .cta {
+        display:inline-block; padding: 12px 20px; border-radius: 8px; font-weight: 700;
+        background: linear-gradient(90deg, #2563eb, #7c3aed); color: #fff; border: none; transition: all 0.3s ease;
+        box-shadow: 0 6px 16px rgba(37,99,235,.35); border-left: 4px solid #4f46e5;
+      }
+      .cta:hover { filter: brightness(1.03); transform: translateY(-2px); box-shadow: 0 10px 22px rgba(37,99,235,.45); }
+      .cta:active { transform: translateY(0); }
+      .stButton>button:hover { background: #4a5568; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
+      .stButton>button:active { transform: translateY(0); }
+      .stDownloadButton>button:hover { background: #718096 !important; transform: translateY(-2px) !important; box-shadow: 0 6px 16px rgba(0,0,0,0.2) !important; }
+      .stDownloadButton>button:active { transform: translateY(0) !important; }
+      
+      /* Force override Streamlit button styles */
+      .stButton > button:hover { background: #4a5568 !important; transform: translateY(-2px) !important; box-shadow: 0 6px 16px rgba(0,0,0,0.2) !important; }
+      .stButton > button:active { transform: translateY(0) !important; }
+      
+      /* Additional button overrides */
+      button[data-testid="baseButton-secondary"]:hover { background: #4a5568 !important; transform: translateY(-2px) !important; }
+      button[data-testid="baseButton-secondary"]:active { transform: translateY(0) !important; }
+
+      /* Metrics */
+      [data-testid="stMetricValue"] { color: #2563eb; }
+
+      /* Links */
+      a { color: #0f67ff; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      /* Pills / badges */
+      .pill {
+        display: inline-block; padding: 4px 10px; margin: 3px; border-radius: 999px;
+        font-size: 12px; font-weight: 600; border: 1px solid #e6edf6; background: #eef3ff; color: #0f172a;
+      }
+      .pill.good { background: #e8faf1; color: #166534; border-color: #c9f0dc; }
+      .pill.warn { background: #fff4e5; color: #92400e; border-color: #ffe0b3; }
+      .pill.bad { background: #fdecec; color: #991b1b; border-color: #ffc9c9; }
+
+      /* KPI box */
+      .kpi {
+        padding: 12px 14px; border-radius: 12px; background: #ffffff; border: 1px solid #e8eef7;
+        box-shadow: 0 4px 12px rgba(15, 103, 255, 0.04); margin-bottom: 10px;
+      }
+      .kpi .title { font-size: 12px; color: #6b7a90; text-transform: uppercase; letter-spacing: .08em; }
+      .kpi .value { font-size: 20px; font-weight: 800; color: #0f67ff; }
+
+      /* Score bar */
+      .scorebar { height: 10px; background: #eef3ff; border-radius: 999px; overflow: hidden; }
+      .scorebar > div { height: 10px; background: linear-gradient(90deg, #0f67ff, #5aa1ff); }
+      .score-badge { position: relative; overflow: hidden; }
+      .score-badge:after { content:""; position:absolute; top:0; left:-40%; width:40%; height:100%;
+        background: linear-gradient(90deg, rgba(255,255,255,.0), rgba(255,255,255,.35), rgba(255,255,255,.0));
+        transform: skewX(-20deg); animation: shine 2.6s infinite; }
+      @keyframes shine { 0%{ left:-40%; } 60%{ left:120%; } 100%{ left:120%; } }
+
+      /* Sidebar branding */
+      .brand-banner { padding: 12px 16px; border-radius: 12px; margin: 4px 0 10px 0;
+                      background: linear-gradient(135deg, #4f46e5 0%, #2563eb 60%, #0ea5e9 100%);
+                      color: #ffffff !important; font-weight: 900; font-size: 22px; text-align: center;
+                      letter-spacing: 1px; text-transform: uppercase; box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+
+      /* Sidebar card */
+      .nav-card { padding: 16px 18px; border-radius: 12px; background: #1f2937 !important; border: 1px solid #374151 !important; box-shadow: 0 8px 24px rgba(0,0,0,0.35) !important; }
+      .nav-title { font-weight: 800; color: #ffffff !important; margin-bottom: 12px; letter-spacing: .3px; }
+      .brand-title { font-size: 20px; font-weight: 900; color: #ffffff !important; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
+      .nav-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+      .nav-item { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-radius:10px; border:1px solid #374151; background:#374151; cursor:pointer; transition: all 0.25s ease; }
+      .nav-item .label { display:flex; align-items:center; gap:10px; font-weight:600; color:#ffffff; }
+      .nav-item .badge { font-size:11px; padding:4px 8px; border-radius:6px; background:#2563eb; color:#ffffff; border:1px solid #1d4ed8; }
+      .nav-item.active { background: #2563eb !important; border-color:#1d4ed8 !important; box-shadow: 0 4px 12px rgba(37,99,235,0.45) !important; }
+      .nav-item:hover { background: #334155 !important; transform: translateY(-1px) !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# (Removed old Navigation links)
+
+# Page anchors
+st.markdown('<a name="top"></a>', unsafe_allow_html=True)
+
+# Simple page switcher
+PAGES = ["Start / Upload", "Edit & Build", "ATS Compatibility", "Resume Generator", "Job Matching", "Insights"]
+
+# Initialize nav state
+if "nav_page" not in st.session_state:
+    st.session_state["nav_page"] = PAGES[0]
+
+with st.sidebar:
+    st.markdown("<div class='brand-banner'>ProFile Analyser</div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<div class='nav-card'>", unsafe_allow_html=True)
+    st.markdown("<div class='nav-title'>Go to</div>", unsafe_allow_html=True)
+    # custom grid buttons that set the radio value
+    for label in PAGES:
+        is_active = (st.session_state.get("nav_page") == label)
+        css_class = "nav-item active" if is_active else "nav-item"
+        cols = st.columns([1,0.3])
+        with cols[0]:
+            if st.button(label, key=f"goto_{label}"):
+                st.session_state["nav_page"] = label
+                try:
+                    st.rerun()
+                except Exception:
+                    pass
+        with cols[1]:
+            st.markdown(f"<div class='badge'>{'Now' if is_active else ''}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='{css_class}' style='display:none'></div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Removed Prev/Next buttons per request
+    # radio defined above
+
+def section_card(title):
+    st.markdown(f"<div class='card'><h3>{title}</h3>", unsafe_allow_html=True)
+
+def end_card():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# Section banners (placeholders until full refactor of content into blocks)
+page = st.session_state.get("nav_page", PAGES[0])
+if page == "Start / Upload":
+    st.markdown('<a name="edit"></a>', unsafe_allow_html=True)
+    st.markdown("## 🏁 Start / Upload")
+elif page == "Edit & Build":
+    st.markdown('<a name="edit"></a>', unsafe_allow_html=True)
+    st.markdown("## ✏️ Edit & Build Resume")
+elif page == "ATS Compatibility":
+    st.markdown('<a name="ats"></a>', unsafe_allow_html=True)
+    st.markdown("## 🎯 ATS Compatibility")
+elif page == "Resume Generator":
+    st.markdown('<a name="generator"></a>', unsafe_allow_html=True)
+    st.markdown("## 📝 Resume Generator")
+elif page == "Job Matching":
+    st.markdown('<a name="jobs"></a>', unsafe_allow_html=True)
+    st.markdown("## 🎯 Job Matching")
+elif page == "Insights":
+    st.markdown('<a name="insights"></a>', unsafe_allow_html=True)
+    st.markdown("## 💡 Insights")
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -15,9 +203,19 @@ def extract_text_from_pdf(file_path):
     try:
         doc = fitz.open(file_path)
         text = ""
+        urls = set()
         for page in doc:
             text += page.get_text()
+            try:
+                for link in page.get_links():
+                    uri = link.get('uri')
+                    if uri and isinstance(uri, str) and uri.startswith(('http://', 'https://')):
+                        urls.add(uri.strip())
+            except Exception:
+                pass
         doc.close()
+        if urls:
+            text += "\n\n" + "\n".join(sorted(urls))
         return text
     except Exception as e:
         st.error(f"Error extracting text from PDF: {e}")
@@ -30,6 +228,19 @@ def extract_text_from_docx(file_path):
         text = ""
         for paragraph in doc.paragraphs:
             text += paragraph.text + "\n"
+        # Append embedded hyperlink targets (clickable links that may not appear in visible text)
+        try:
+            from docx.opc.constants import RELATIONSHIP_TYPE as DOCX_RT
+            urls = set()
+            for rel in doc.part.rels.values():
+                if getattr(rel, 'reltype', None) == DOCX_RT.HYPERLINK:
+                    target = getattr(rel, 'target_ref', None)
+                    if target and isinstance(target, str) and target.startswith(('http://', 'https://')):
+                        urls.add(target.strip())
+            if urls:
+                text += "\n" + "\n".join(sorted(urls))
+        except Exception:
+            pass
         return text
     except Exception as e:
         st.error(f"Error extracting text from DOCX: {e}")
@@ -344,22 +555,45 @@ def normalize_section_heading(text):
 def extract_personal_info(text):
     """Enhanced personal information extraction"""
     # Improved name extraction
-    name_patterns = [
-        r"(?i)^(?:name\s*[:\-]?\s*)([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
-        r"(?i)([A-Z][a-z]+ [A-Z][a-z]+)(?:\s*[-|]\s*[A-Za-z\s]+)?$",
-        r"(?i)([A-Z][a-z]+ [A-Z][a-z]+)(?:\s*[-|]\s*[A-Za-z\s]+)?$"
-    ]
-    
+    # 1) Heuristic: check first few non-empty lines for a likely full name
+    lines = [ln.strip() for ln in text.split("\n")[:15] if ln.strip()]
     name = "Not found"
-    for pattern in name_patterns:
-        match = re.search(pattern, text[:500])
-        if match:
-            candidate_name = match.group(1).strip()
-            # Filter out common tech words that might be mistaken for names
-            tech_words = {"java", "python", "html", "css", "sql", "react", "node", "django", "flask", "aws", "azure"}
-            if candidate_name.lower() not in tech_words and len(candidate_name.split()) <= 3:
-                name = candidate_name
-                break
+    if lines:
+        for ln in lines[:5]:
+            # Accept 2-4 words, mostly alphabetic, not all uppercase, minimal punctuation
+            tokens = [t for t in re.split(r"\s+", ln) if t]
+            if 2 <= len(tokens) <= 4 and sum(ch.isalpha() for ch in ln) / max(1, len(ln)) > 0.6:
+                if not ln.isupper():
+                    candidate = re.sub(r"[^A-Za-z\s\-']", "", ln).strip()
+                    # Avoid role titles appended after a dash/pipe
+                    candidate = re.split(r"\s[-|]\s", candidate)[0].strip()
+                    tech_words = {"java", "python", "html", "css", "sql", "react", "node", "django", "flask", "aws", "azure"}
+                    if candidate and candidate.lower() not in tech_words:
+                        name = candidate
+                        break
+    # 2) Fallback: regex patterns near top of doc
+    if name == "Not found":
+        name_patterns = [
+            r"(?i)^(?:name\s*[:\-]?\s*)([A-Z][a-z]+(?: [A-Z][a-z]+)+)",
+            r"(?im)^([A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2})(?:\s*[-|]\s*[A-Za-z\s]+)?$"
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, "\n".join(lines[:10]))
+            if match:
+                candidate_name = match.group(1).strip()
+                tech_words = {"java", "python", "html", "css", "sql", "react", "node", "django", "flask", "aws", "azure"}
+                if candidate_name and candidate_name.lower() not in tech_words and len(candidate_name.split()) <= 4:
+                    name = candidate_name
+                    break
+    # 3) Fallback: NER on top section
+    if name == "Not found":
+        try:
+            doc = nlp("\n".join(lines[:10]))
+            person_ents = [ent.text.strip() for ent in doc.ents if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4]
+            if person_ents:
+                name = person_ents[0]
+        except Exception:
+            pass
     
     # Enhanced email extraction
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -383,17 +617,31 @@ def extract_personal_info(text):
             break
     
     # Enhanced URL extraction
-    linkedin_pattern = r'(?:linkedin\s*[:\-]?\s*)?(https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-/?=]+|www\.linkedin\.com/in/[a-zA-Z0-9\-/?=]+|linkedin\.com/in/[a-zA-Z0-9\-_/?=]+)'
-    linkedin_matches = re.findall(linkedin_pattern, text, re.IGNORECASE)
-    linkedin = linkedin_matches[0] if linkedin_matches else "Not found"
-    
-    github_pattern = r'(?:github\s*[:\-]?\s*)?(https?://(?:www\.)?github\.com/[a-zA-Z0-9\-/?=]+|www\.github\.com/[a-zA-Z0-9\-/?=]+|github\.com/[a-zA-Z0-9\-_/?=]+)'
-    github_matches = re.findall(github_pattern, text, re.IGNORECASE)
-    github = github_matches[0] if github_matches else "Not found"
-    
-    portfolio_pattern = r'(?:portfolio\s*[:\-]?\s*)?(https?://[\w\.-]+\.(me|dev|xyz|site|portfolio|io|com)/[a-zA-Z0-9\-_/?=]*)'
-    portfolio_matches = re.findall(portfolio_pattern, text, re.IGNORECASE)
-    portfolio = portfolio_matches[0][0] if portfolio_matches else "Not found"
+    def normalize_url(u: str) -> str:
+        if not u:
+            return u
+        u = u.strip()
+        if u.startswith("www."):
+            return "https://" + u
+        if u.startswith("linkedin.com"):
+            return "https://www." + u
+        if u and not u.startswith("http"):
+            return "https://" + u
+        return u
+
+    # Accept URLs with or without protocol and across potential newlines after labels
+    joined = text
+    linkedin_pattern = r'(?:linkedin\s*[:\-]?\s*(?:\n|\r|\s)*)?(https?://(?:www\.)?linkedin\.com/[a-zA-Z0-9\-_/=?]+|www\.linkedin\.com/[a-zA-Z0-9\-_/=?]+|linkedin\.com/[a-zA-Z0-9\-_/=?]+)'
+    linkedin_matches = re.findall(linkedin_pattern, joined, re.IGNORECASE)
+    linkedin = normalize_url(linkedin_matches[0]) if linkedin_matches else "Not found"
+
+    github_pattern = r'(?:github\s*[:\-]?\s*(?:\n|\r|\s)*)?(https?://(?:www\.)?github\.com/[a-zA-Z0-9\-_/=?]+|www\.github\.com/[a-zA-Z0-9\-_/=?]+|github\.com/[a-zA-Z0-9\-_/=?]+)'
+    github_matches = re.findall(github_pattern, joined, re.IGNORECASE)
+    github = normalize_url(github_matches[0]) if github_matches else "Not found"
+
+    portfolio_pattern = r'(?:portfolio\s*[:\-]?\s*(?:\n|\r|\s)*)?(https?://[\w\.-]+\.[a-z]{2,}(?:/[a-zA-Z0-9\-_/=?#]+)?|www\.[\w\.-]+\.[a-z]{2,}(?:/[a-zA-Z0-9\-_/=?#]+)?)'
+    portfolio_matches = re.findall(portfolio_pattern, joined, re.IGNORECASE)
+    portfolio = normalize_url(portfolio_matches[0]) if portfolio_matches else "Not found"
     
     return {
         "name": name,
@@ -406,25 +654,110 @@ def extract_personal_info(text):
 
 # --- Enhanced Education Extraction ---
 def extract_education_info(text):
-    """Enhanced education information extraction"""
-    education_patterns = [
-        r'((?:Bachelor|Master|B\.Sc|M\.Sc|B\.Tech|M\.Tech|PhD|MBA|BBA|MBA|Associate|Diploma)[^\n\r,;]?(?:at|from|in)?\s*([A-Za-z .&\'-]+)?\s*(\d{4})?)',
-        r'((?:Bachelor|Master|B\.Sc|M\.Sc|B\.Tech|M\.Tech|PhD|MBA|BBA|MBA|Associate|Diploma)[^\n\r,;]?(?:at|from|in)?\s*([A-Za-z .&\'-]+)?\s*(\d{4})?)',
-        r'([A-Za-z .&\'-]+(?:University|College|Institute|School)[^\n\r,;]\s(\d{4})?)'
+    """Enhanced education information extraction (section-aware, robust patterns, deduped)"""
+    degree_keywords = [
+        "bachelor", "master", "phd", "m\.?tech", "b\.?tech", "b\.?e", "m\.?e",
+        "b\.?sc", "m\.?sc", "mba", "bba", "associate", "diploma", "high school",
+        "intermediate", "secondary", "senior secondary", "10th", "12th", "hsc", "ssc"
     ]
-    
-    education = []
-    for pattern in education_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+    inst_keywords = [
+        "university", "college", "institute", "school", "academy", "polytechnic"
+    ]
+    year_pattern = r"(19|20)\d{2}"
+    range_pattern = r"(19|20)\d{2}\s*[\-–—]\s*(19|20)?\d{2}|to\s*(19|20)\d{2}"
+
+    found = []
+
+    # 1) Section-aware parse: Education/Academics/Qualifications
+    header_multi = re.compile(r"(?im)^(education|academics|academic qualifications|qualifications|educational background)\b[:\-]?(.*)$")
+    for header in header_multi.finditer(text):
+        start = header.end()
+        nxt = re.search(r"(?im)^(experience|work|employment|projects|skills?|certifications?|licenses|summary|objective|contact|achievements?)\b", text[start:])
+        end = start + nxt.start() if nxt else len(text)
+        block = text[start:end]
+        if header.group(2):
+            block = header.group(2) + "\n" + block
+        items = re.split(r"[\n\r;\u2022\u2023\u25E6\u2043\-\–\—\|/•·∙‣◦▪]+", block)
+        for item in items:
+            line = item.strip()
+            low = line.lower()
+            if len(line) < 4:
+                continue
+            if any(re.search(k, low) for k in degree_keywords) or any(k in low for k in inst_keywords) or re.search(year_pattern, low):
+                # Keep typical education lines; avoid pure addresses/contacts
+                if "@" in low or "http" in low:
+                    continue
+                found.append(line)
+
+    # 2) Fallback patterns across full text
+    degree_union = '(?:' + '|'.join(degree_keywords) + ')'
+    inst_union = '(?:' + '|'.join(inst_keywords) + ')'
+    patterns = [
+        rf"(({degree_union})[^\n\r,;]*?(?:at|from|in)?\s*[A-Za-z .&'\-]*\s*(?:{year_pattern})?(?:\s*(?:{range_pattern}))?)",
+        rf"([A-Za-z .&'\-]+(?:{inst_union})[^\n\r,;]*\s*(?:{year_pattern})?(?:\s*(?:{range_pattern}))?)"
+    ]
+    for pattern in patterns:
+        try:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+        except re.error:
+            continue
         for match in matches:
             if isinstance(match, tuple):
-                edu_text = ' '.join([m for m in match if m]).strip()
+                edu_text = ' '.join([m for m in match if isinstance(m, str) and m]).strip()
             else:
                 edu_text = match.strip()
             if edu_text and len(edu_text) > 5:
-                education.append(edu_text)
-    
-    return education if education else ["Not found"]
+                found.append(edu_text)
+
+    # 3) Normalize and deduplicate
+    normalized = []
+    seen = set()
+    for line in found:
+        clean = re.sub(r"\s+", " ", line).strip(" .")
+        # Collapse duplicated consecutive words: e.g., "Intermediate Intermediate" -> "Intermediate"
+        clean = re.sub(r"\b(\w+)(?:\s+\1)+\b", r"\1", clean, flags=re.IGNORECASE)
+        key = clean.lower()
+        if key not in seen:
+            seen.add(key)
+            normalized.append(clean)
+
+    # 4) Preferred formatting: B.Tech college, Intermediate college, 10th school
+    def extract_institute(line_text: str) -> str:
+        t = line_text
+        # Remove degree keywords and years
+        t = re.sub(r"(?i)\b(b\.?(e|tech)|btech|b\.e|b\.tech|m\.?(e|tech)|mtech|b\.sc|m\.sc|bsc|msc|phd|mba|bba|associate|diploma|intermediate|12th|hsc|senior secondary|10th|ssc|secondary|standard|grade)\b", " ", t)
+        t = re.sub(r"(?i)\b(at|from|in|of)\b", " ", t)
+        t = re.sub(r"\b(19|20)\d{2}\b", " ", t)
+        t = re.sub(r"\s+[\-–—]\s+", " ", t)
+        t = re.sub(r"\s+", " ", t).strip(" ,.-")
+        return t
+
+    btech_line = None
+    inter_line = None
+    ssc_line = None
+
+    for ln in normalized:
+        low = ln.lower()
+        if btech_line is None and re.search(r"\b(b\.?(e|tech)|btech|b\.e|b\.tech)\b", low):
+            btech_line = f"B.Tech - {extract_institute(ln)}".strip()
+        if inter_line is None and re.search(r"\b(intermediate|12th|hsc|senior secondary)\b", low):
+            inter_line = f"Intermediate - {extract_institute(ln)}".strip()
+        if ssc_line is None and re.search(r"\b(10th|ssc|secondary)\b", low):
+            ssc_line = f"SSC - {extract_institute(ln)}".strip()
+
+    preferred = [x for x in [btech_line, inter_line, ssc_line] if x and len(x.split('-')[-1].strip()) > 0]
+    if preferred:
+        # Deduplicate preferred
+        seenp = set()
+        finalp = []
+        for x in preferred:
+            k = x.lower()
+            if k not in seenp:
+                seenp.add(k)
+                finalp.append(x)
+        return finalp
+
+    return normalized if normalized else ["Not found"]
 
 # --- Enhanced Skills Extraction with Preprocessing ---
 def preprocess_text(text):
@@ -441,13 +774,51 @@ def extract_skills_enhanced(text):
     processed_text = preprocess_text(text)
     doc = nlp(processed_text)
     
-    # Technical skills from known keywords
+    # Section-aware extraction from explicit Skills sections (support multiple)
+    section_skills_map = {}
+    try:
+        header_regex = re.compile(r"(?im)^(skills?|technical skills?)\b[:\-]?(.*)$")
+        for m in header_regex.finditer(text):
+            start = m.end()
+            next_header = re.search(r"(?im)^(experience|work|employment|projects|education|certifications?|licenses|summary|objective|contact)\b", text[start:])
+            end = start + next_header.start() if next_header else len(text)
+            skills_block = text[start:end]
+            if m.group(2):
+                skills_block = m.group(2) + "\n" + skills_block
+            raw_items = re.split(r"[\n\r,;\u2022\u2023\u25E6\u2043\-\–\—\|/•·∙‣◦▪]+", skills_block)
+            for item in raw_items:
+                original = item.strip()
+                cleaned_norm = re.sub(r"[^a-zA-Z0-9\+\.#\s]", "", original).strip().lower()
+                if 1 < len(cleaned_norm) <= 40:
+                    section_skills_map.setdefault(cleaned_norm, original)
+    except Exception:
+        pass
+
+    # Contextual spans like "proficient in", "experience with", etc.
+    context_spans_text = []
+    try:
+        ctx_regex = re.compile(r"(?i)(skills?\s*[:\-]|proficient in|experience with|technologies\s*[:\-]|tools\s*[:\-]|stack\s*[:\-]|familiar with)\s*(.{0,200})")
+        for ctx in ctx_regex.finditer(text):
+            span = ctx.group(2)
+            if span:
+                context_spans_text.append(span)
+    except Exception:
+        pass
+    context_terms = set()
+    for span in context_spans_text:
+        for token in re.split(r"[\n\r,;\u2022\u2023\u25E6\u2043\-\–\—\|/•·∙‣◦▪]+", span):
+            cleaned = re.sub(r"[^a-zA-Z0-9\+\.#\s]", "", token).strip().lower()
+            if 1 < len(cleaned) <= 40:
+                context_terms.add(cleaned)
+
+    # Technical skills from known keywords but limit to Skills sections or contextual spans
     technical_skills = set()
     for field, skills in SKILL_KEYWORDS.items():
         for skill in skills:
-            if skill.lower() in processed_text:
-                technical_skills.add(skill.lower())
-    
+            k = skill.lower()
+            if k in section_skills_map or k in context_terms:
+                technical_skills.add(k)
+
     # Soft skills detection
     soft_skills = [
         "leadership", "communication", "teamwork", "problem solving", "critical thinking",
@@ -462,44 +833,303 @@ def extract_skills_enhanced(text):
         if skill.lower() in processed_text:
             detected_soft_skills.add(skill.lower())
     
-    # Named entity recognition for additional skills
+    # Named entity recognition for additional skills (only from skills blocks)
     ner_skills = set()
-    for ent in doc.ents:
-        if ent.label_ in ["ORG", "PRODUCT"] and len(ent.text) < 30:
-            ner_skills.add(ent.text.lower())
+    try:
+        skills_blocks_concat = "\n".join(section_skills_map.values()).lower()
+        if skills_blocks_concat:
+            doc_blocks = nlp(preprocess_text(skills_blocks_concat))
+            for ent in doc_blocks.ents:
+                if ent.label_ in ["ORG", "PRODUCT"] and len(ent.text) < 30:
+                    ner_skills.add(ent.text.lower())
+    except Exception:
+        pass
     
-    all_skills = technical_skills.union(detected_soft_skills).union(ner_skills)
-    return list(all_skills) if all_skills else ["Not found"]
+    # Merge and normalize unique skills
+    all_norm = set(section_skills_map.keys())
+    all_norm |= technical_skills
+    all_norm |= detected_soft_skills
+    all_norm |= ner_skills
+    
+    # Filters to remove institutions/companies and noise from skills
+    org_edu_blocklist = [
+        "university", "college", "school", "institute", "academy", "junior college",
+        "polytechnic", "campus"
+    ]
+    org_company_blocklist = [
+        " private limited", " pvt", "pvt.", "limited", " ltd", "ltd.", " inc", "inc.", " llc", "llc.",
+        "solutions", "technologies", "labs", "systems", "corporation", "corp", "company"
+    ]
+    def looks_like_org_or_edu(s: str) -> bool:
+        low = s.lower()
+        if any(k in low for k in org_edu_blocklist):
+            return True
+        if any(k in low for k in org_company_blocklist):
+            return True
+        if re.search(r"\b(19|20)\d{2}\b", low):
+            return True
+        if "@" in low or "http" in low:
+            return True
+        # Too many digits likely not a skill
+        digits = sum(ch.isdigit() for ch in low)
+        if digits / max(1, len(low)) > 0.3:
+            return True
+        return False
+
+    # Prefer original casing from section items when available
+    result = []
+    for s in all_norm:
+        if s in section_skills_map:
+            val = re.sub(r"\s+", " ", section_skills_map[s]).strip(" .")
+            if not looks_like_org_or_edu(val):
+                result.append(val)
+        else:
+            if not looks_like_org_or_edu(s):
+                result.append(s)
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for it in result:
+        key = it.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(it)
+
+    # Final cleanup: remove noise, expand acronyms, allow only known short skills
+    noise_terms = {
+        "tstracking", "tracking id", "tracking", "na", "n/a"
+    }
+    alias_map = {
+        "ar": "Augmented Reality",
+        "vr": "Virtual Reality",
+        "ai": "Artificial Intelligence",
+        "ml": "Machine Learning",
+        "nlp": "Natural Language Processing",
+        "ux": "User Experience",
+        "ui": "User Interface",
+        "sem": "Search Engine Marketing",
+        "seo": "Search Engine Optimization",
+        "ips": "Intrusion Prevention System",
+        "ids": "Intrusion Detection System",
+    }
+    allowed_short = {
+        "ai", "ml", "dl", "nlp", "cv", "ux", "ui", "qa", "db", "ar", "vr", "sem", "seo", "ips", "ids"
+    }
+    cleaned = []
+    seen2 = set()
+    for item in unique:
+        base = item.strip()
+        low = base.lower()
+        if low in noise_terms:
+            continue
+        # Drop very short tokens unless in allowlist
+        if len(low) <= 2 and low not in allowed_short:
+            continue
+        if 2 < len(low) <= 3 and low not in allowed_short and not low.isupper():
+            # three-letter lowercase randoms are likely noise unless allowed
+            continue
+        # Expand known acronyms to canonical names
+        if low in alias_map:
+            base = alias_map[low]
+        # Normalize inner spaces
+        base = re.sub(r"\s+", " ", base).strip()
+        key2 = base.lower()
+        if key2 not in seen2:
+            seen2.add(key2)
+            cleaned.append(base)
+
+    return cleaned if cleaned else ["Not found"]
 
 # --- Enhanced Certifications Extraction ---
 def extract_certifications_enhanced(text):
     """Enhanced certifications extraction"""
     # Known certification providers and keywords
     cert_providers = [
-        "coursera", "udemy", "edx", "udacity", "aws", "google", "microsoft", "ibm",
+        "coursera", "udemy", "edx", "udacity", "aws", "amazon", "google", "microsoft", "ibm",
         "oracle", "linkedin learning", "skillshare", "pluralsight", "datacamp",
         "deeplearning.ai", "fast.ai", "kaggle", "hackerrank", "leetcode"
     ]
     
-    # Certification keywords
+    # Certification keywords and patterns
     cert_keywords = [
         "certified", "certification", "certificate", "accredited", "professional",
-        "specialist", "expert", "master", "foundation", "associate", "professional"
+        "specialist", "expert", "master", "foundation", "associate"
     ]
-    
-    certifications = []
-    lines = text.lower().split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if any(provider in line for provider in cert_providers):
-            certifications.append(line)
-        elif any(keyword in line for keyword in cert_keywords):
-            # Check if it's not just a common word
-            if len(line) > 10 and not any(word in line for word in ["university", "college", "school", "degree"]):
-                certifications.append(line)
-    
-    return certifications if certifications else ["Not found"]
+    patterns = [
+        r"\baws certified [a-zA-Z ][a-zA-Z \-+:/()0-9]+",
+        r"\bgoogle (?:cloud )?professional [a-zA-Z \-+:/()0-9]+",
+        r"\b(?:microsoft|azure) certified [a-zA-Z \-+:/()0-9]+",
+        r"\bcertificate in [a-zA-Z \-+:/()0-9]+",
+        r"\bcertification in [a-zA-Z \-+:/()0-9]+"
+    ]
+
+    found = set()
+    # Common cert acronyms and codes
+    cert_acronyms = [
+        "pmp", "cissp", "ceh", "ccna", "csm", "psm", "pspo", "itil", "ocp", "oca",
+        "security+", "network+", "a+", "aws saa", "aws sap", "gcp pca", "az-900", "dp-100",
+        "pl-300", "sc-200", "ai-102", "ms-900"
+    ]
+    code_pattern = re.compile(r"\b[A-Z]{2,}-\d{2,3}\b")
+
+    # 1) Section-aware parsing
+    lower = text.lower()
+    # Parse multiple certification-like sections
+    header_multi = re.compile(r"(?im)^(certificates?|certifications?|licenses?(?:\s*&\s*certifications?)?|licenses|courses|training|professional development|credentials|badges|awards\s*&\s*certifications?)\b[:\-]?(.*)$")
+    for header in header_multi.finditer(text):
+        start = header.end()
+        nxt = re.search(r"(?im)^(experience|work|employment|projects|education|skills?|summary|objective|contact|achievements?)\b", text[start:])
+        end = start + nxt.start() if nxt else len(text)
+        block = text[start:end]
+        if header.group(2):
+            block = header.group(2) + "\n" + block
+        # Split by lines, bullets, commas, semicolons, pipes (avoid splitting on hyphens/dashes to keep titles intact)
+        items = re.split(r"[\n\r,;\u2022\u2023\u25E6\u2043\|/•·∙‣◦▪]+", block)
+        for item in items:
+            clean = item.strip()
+            low = clean.lower()
+            if len(clean) < 3:
+                continue
+            # Within certification-like sections, accept reasonable certificate/course lines
+            if any(ex in low for ex in ["university", "college", "school", "degree"]):
+                continue
+            # Keep if clear signals present
+            titlecase_words = sum(1 for w in re.findall(r"\b[A-Za-z][a-z]+\b", clean) if w[:1].isupper())
+            signals = (
+                any(p in low for p in cert_providers) or
+                any(k in low for k in cert_keywords) or
+                any(a in low for a in cert_acronyms) or
+                code_pattern.search(clean) or
+                any(w in low for w in ["course", "training", "badge", "credential", "nanodegree", "bootcamp", "license", "academy", "forage"])
+            )
+            if signals or titlecase_words >= 2:
+                # Collapse duplicated consecutive words inside item
+                cleaned_item = re.sub(r"\b(\w+)(?:\s+\1)+\b", r"\1", clean, flags=re.IGNORECASE)
+                found.add(cleaned_item)
+
+    # 2) Line-by-line heuristics across entire document
+    for raw in text.split("\n"):
+        line = raw.strip()
+        low = line.lower()
+        if any(provider in low for provider in cert_providers) and len(line) > 3:
+            found.add(line)
+        elif (any(keyword in low for keyword in cert_keywords) or any(a in low for a in cert_acronyms) or code_pattern.search(line)) and len(line) > 3 and not any(ex in low for ex in ["university", "college", "school", "degree"]):
+            found.add(line)
+        else:
+            for pat in patterns:
+                m = re.search(pat, low)
+                if m:
+                    found.add(line)
+                    break
+
+    normalized = {re.sub(r"\s+", " ", c).strip(" .") for c in found}
+    return list(normalized) if normalized else ["Not found"]
+
+# --- Enhanced Projects Extraction ---
+def extract_projects(text):
+    """Extract project titles/lines from resume text (section-aware with fallbacks)."""
+    projects = []
+
+    def title_from_line(line: str) -> str:
+        s = line.strip().strip("-–—|:;•·")
+        # Take portion before comma if it looks like tags list
+        if "," in s and len(s.split(",")[0].split()) <= 6:
+            s = s.split(",")[0].strip()
+        # Prefer text before separators
+        for sep in [" - ", " – ", " — ", ":", " | ", " |", "| "]:
+            if sep in s:
+                left = s.split(sep)[0].strip()
+                if len(left) >= 3:
+                    s = left
+                    break
+        # Remove trailing parenthetical details
+        s = re.sub(r"\s*\([^)]*\)$", "", s).strip()
+        # If long sentence, try to capture leading Title Case chunk
+        m = re.match(r"^([A-Z][A-Za-z0-9]+(?:[\s\-][A-Z][A-Za-z0-9]+){0,6})\b", s)
+        if m and len(m.group(1)) >= 3:
+            return m.group(1)
+        # Otherwise limit to first 6 words
+        return " ".join(s.split()[:6]).strip()
+
+    def is_valid_title(title: str) -> bool:
+        low = title.lower().strip()
+        if len(low) < 3:
+            return False
+        stop_exact = {
+            "technologies", "internships", "internship", "currently", "experience", "responsibilities",
+            "built", "created", "developed"
+        }
+        if low in stop_exact:
+            return False
+        stop_sub = [" internship", "internship ", " responsibilities", " duties"]
+        if any(ss in low for ss in stop_sub):
+            return False
+        # Allow CamelCase single tokens like ScholarHunt
+        if " " not in title and re.search(r"[A-Z][a-z]+[A-Z][a-z]+", title):
+            return True
+        # Prefer 2-6 words for multi-word titles
+        wc = len(title.split())
+        if 2 <= wc <= 6:
+            return True
+        return False
+    # 1) Section-aware: Projects/Personal Projects/Academic Projects
+    try:
+        header_multi = re.compile(r"(?im)^(projects?|personal projects?|academic projects?)\b[:\-]?(.*)$")
+        for header in header_multi.finditer(text):
+            start = header.end()
+            nxt = re.search(r"(?im)^(experience|work|employment|education|skills?|certifications?|licenses|summary|objective|contact|achievements?)\b", text[start:])
+            end = start + (nxt.start() if nxt else 0) if nxt else len(text)
+            block = text[start:end]
+            # If inline items on header line
+            if header.group(2):
+                block = header.group(2) + "\n" + block
+            # Split primarily by newlines and bullets (avoid splitting on hyphens to keep names intact)
+            items = re.split(r"[\n\r\u2022\u2023\u25E6\u2043•·∙‣◦▪]+", block)
+            for raw in items:
+                line = raw.strip().strip("-–—|:;")
+                if len(line) < 5:
+                    continue
+                # Typical noise filters
+                low = line.lower()
+                if any(h in low for h in ["experience", "education", "skills", "certification", "contact"]):
+                    continue
+                t = title_from_line(line)
+                if is_valid_title(t):
+                    projects.append(t)
+    except Exception:
+        pass
+
+    # 2) Fallback: scan for lines containing project-like cues
+    if not projects:
+        cues = ["project:", "capstone", "built", "developed", "implemented", "designed", "engineered"]
+        lines = text.splitlines()
+        for i, ln in enumerate(lines):
+            low = ln.strip().lower()
+            if any(c in low for c in cues):
+                cleaned = ln.strip().strip("-–—|:;")
+                if len(cleaned) > 5:
+                    t = title_from_line(cleaned)
+                    if is_valid_title(t):
+                        projects.append(t)
+                # Grab immediate next bullet/line as context
+                if i + 1 < len(lines):
+                    nxt = lines[i+1].strip().strip("-–—|:;")
+                    if len(nxt) > 5:
+                        t2 = title_from_line(nxt)
+                        if is_valid_title(t2):
+                            projects.append(t2)
+
+    # Normalize and deduplicate
+    normalized = []
+    seen = set()
+    for p in projects:
+        clean = re.sub(r"\s+", " ", p).strip(" .")
+        if len(clean) > 4:
+            k = clean.lower()
+            if k not in seen:
+                seen.add(k)
+                normalized.append(clean)
+    return normalized if normalized else ["Not found"]
 
 # --- Enhanced Info Extraction Function ---
 def extract_info(text):
@@ -516,6 +1146,9 @@ def extract_info(text):
     # Extract certifications
     certifications = extract_certifications_enhanced(text)
     
+    # Extract projects
+    projects = extract_projects(text)
+    
     return {
         "name": personal_info["name"],
         "email": personal_info["email"],
@@ -523,6 +1156,7 @@ def extract_info(text):
         "education": education,
         "skills": skills,
         "certifications": certifications,
+        "projects": projects,
         "linkedin": personal_info["linkedin"],
         "github": personal_info["github"],
         "portfolio": personal_info["portfolio"]
@@ -650,11 +1284,15 @@ CERT_PROVIDERS = ["coursera", "udemy", "aws", "google", "microsoft", "edx", "uda
 
 # --- Detect Field ---
 def detect_field(text_or_skills):
-    skill_set = set([s.lower() for s in text_or_skills.split()] if isinstance(text_or_skills, str) else [s.lower() for s in text_or_skills])
+    # Build a searchable lowercase corpus from either raw text or extracted skills
+    if isinstance(text_or_skills, str):
+        corpus = text_or_skills.lower()
+    else:
+        corpus = " ".join([s for s in text_or_skills if isinstance(s, str)]).lower()
     max_matches = 0
     best_field = "General"
     for field, keywords in SKILL_KEYWORDS.items():
-        match_count = sum(1 for kw in keywords if kw.lower() in skill_set)
+        match_count = sum(1 for kw in keywords if kw.lower() in corpus)
         if match_count > max_matches:
             max_matches = match_count
             best_field = field
@@ -699,18 +1337,18 @@ def dynamic_resume_score(text, info, field="General"):
     score = 0
     breakdown = {}
     
-    # === 1. CONTENT COMPLETENESS (25 points) ===
+    # === 1. CONTENT COMPLETENESS (20 points) ===
     content_score = 0
     
-    # Essential sections (15 points)
+    # Essential sections (12 points)
     essential_sections = ["experience", "education", "skills"]
     present_essential = sum(1 for section in essential_sections if section in text.lower())
-    content_score += (present_essential / len(essential_sections)) * 15
+    content_score += (present_essential / len(essential_sections)) * 12
     
-    # Optional sections (10 points)
+    # Optional sections (8 points)
     optional_sections = ["objective", "summary", "projects", "certifications", "achievements", "volunteer"]
     present_optional = sum(1 for section in optional_sections if section in text.lower())
-    content_score += min((present_optional / len(optional_sections)) * 10, 10)
+    content_score += min((present_optional / len(optional_sections)) * 8, 8)
     
     score += content_score
     breakdown["Content Completeness"] = round(content_score, 1)
@@ -805,29 +1443,64 @@ def dynamic_resume_score(text, info, field="General"):
     score += presentation_score
     breakdown["Professional Presentation"] = round(presentation_score, 1)
     
-    # === 5. ATS OPTIMIZATION (15 points) ===
+    # === 5. ATS OPTIMIZATION (20 points) ===
     ats_score = 0
+    ats_breakdown = {}
     
-    # Keyword optimization (8 points)
+    # === ATS Keyword Optimization (8 points) ===
     field_keywords = SKILL_KEYWORDS.get(field, [])
     if field_keywords:
         keyword_matches = sum(1 for keyword in field_keywords if keyword.lower() in text.lower())
         keyword_ratio = keyword_matches / max(1, len(field_keywords))
-        ats_score += keyword_ratio * 8
+        keyword_score = keyword_ratio * 8
+        ats_score += keyword_score
+        ats_breakdown["Keyword Match"] = round(keyword_score, 1)
+    else:
+        ats_breakdown["Keyword Match"] = 0
     
-    # Standard section headers (4 points)
-    standard_headers = ["experience", "education", "skills", "certifications", "projects", "summary"]
+    # === ATS Section Headers (4 points) ===
+    standard_headers = ["experience", "education", "skills", "certifications", "projects", "summary", "objective"]
     header_matches = sum(1 for header in standard_headers if header in text.lower())
-    ats_score += (header_matches / len(standard_headers)) * 4
+    header_score = (header_matches / len(standard_headers)) * 4
+    ats_score += header_score
+    ats_breakdown["Section Headers"] = round(header_score, 1)
     
-    # File format and readability (3 points)
-    if len(text) > 500 and len(text) < 5000:  # Optimal length
-        ats_score += 3
-    elif len(text) > 200:
-        ats_score += 1
+    # === ATS Format Compatibility (3 points) ===
+    format_score = 0
+    # Check for common ATS-friendly formatting
+    if "•" in text or "- " in text:  # Bullet points
+        format_score += 1
+    if not any(char in text for char in ["[", "]", "{", "}", "|", "~", "^"]):  # No special characters
+        format_score += 1
+    if len(text) > 500 and len(text) < 3000:  # Optimal length
+        format_score += 1
+    ats_score += format_score
+    ats_breakdown["Format Compatibility"] = format_score
+    
+    # === ATS Contact Information (2 points) ===
+    contact_score = 0
+    if info['email'] != 'Not found':
+        contact_score += 1
+    if info['phone'] != 'Not found':
+        contact_score += 1
+    ats_score += contact_score
+    ats_breakdown["Contact Info"] = contact_score
+    
+    # === ATS Experience Details (3 points) ===
+    experience_score = 0
+    # Check for job titles, company names, dates
+    if any(word in text.lower() for word in ["experience", "work", "employment", "job"]):
+        experience_score += 1
+    if any(word in text.lower() for word in ["2024", "2023", "2022", "2021", "2020"]):
+        experience_score += 1
+    if any(word in text.lower() for word in ["company", "corporation", "inc", "ltd", "llc"]):
+        experience_score += 1
+    ats_score += experience_score
+    ats_breakdown["Experience Details"] = experience_score
     
     score += ats_score
     breakdown["ATS Optimization"] = round(ats_score, 1)
+    breakdown["ATS Details"] = ats_breakdown
     
     # === BONUS POINTS (up to 10 points) ===
     bonus_points = 0
@@ -987,6 +1660,97 @@ def get_strengths_weaknesses(text, info):
     # Limit to top 5 most important items
     return strengths[:5], weaknesses[:5]
 
+# --- ATS Feature Extraction and Analysis ---
+def extract_ats_features(text, info, field):
+    """
+    Comprehensive ATS feature extraction and analysis.
+    Returns detailed breakdown of ATS compatibility factors.
+    """
+    features = {}
+    
+    # === KEYWORD ANALYSIS ===
+    field_keywords = SKILL_KEYWORDS.get(field, [])
+    if field_keywords:
+        keyword_matches = [kw for kw in field_keywords if kw.lower() in text.lower()]
+        features["Keywords Found"] = keyword_matches[:10]  # Top 10 matches
+        features["Keyword Match Rate"] = f"{len(keyword_matches)}/{len(field_keywords)} ({len(keyword_matches)/len(field_keywords)*100:.1f}%)"
+    else:
+        features["Keywords Found"] = []
+        features["Keyword Match Rate"] = "N/A"
+    
+    # === SECTION HEADERS ===
+    standard_headers = ["experience", "education", "skills", "certifications", "projects", "summary", "objective", "work history", "employment"]
+    found_headers = [h for h in standard_headers if h in text.lower()]
+    features["Standard Headers Found"] = found_headers
+    features["Header Compliance"] = f"{len(found_headers)}/{len(standard_headers)} ({len(found_headers)/len(standard_headers)*100:.1f}%)"
+    
+    # === CONTACT INFORMATION ===
+    contact_info = {}
+    contact_info["Email"] = "Present" if info['email'] != 'Not found' else "Missing"
+    contact_info["Phone"] = "Present" if info['phone'] != 'Not found' else "Missing"
+    contact_info["LinkedIn"] = "Present" if info['linkedin'] != 'Not found' else "Missing"
+    features["Contact Information"] = contact_info
+    
+    # === FORMATTING ANALYSIS ===
+    formatting = {}
+    formatting["Bullet Points"] = "Present" if "•" in text or "- " in text else "Missing"
+    formatting["Special Characters"] = "Clean" if not any(char in text for char in ["[", "]", "{", "}", "|", "~", "^"]) else "Contains Special Chars"
+    formatting["Content Length"] = f"{len(text)} characters ({'Optimal' if 500 <= len(text) <= 3000 else 'Too Short' if len(text) < 500 else 'Too Long'})"
+    features["Formatting"] = formatting
+    
+    # === EXPERIENCE DETAILS ===
+    experience = {}
+    experience["Experience Section"] = "Present" if any(word in text.lower() for word in ["experience", "work", "employment"]) else "Missing"
+    experience["Recent Dates"] = "Present" if any(year in text for year in ["2024", "2023", "2022"]) else "Missing"
+    experience["Company Names"] = "Present" if any(word in text.lower() for word in ["company", "corporation", "inc", "ltd", "llc"]) else "Missing"
+    features["Experience Details"] = experience
+    
+    # === SKILLS ANALYSIS ===
+    skills = {}
+    valid_skills = [s for s in info['skills'] if s != 'Not found' and len(s.strip()) > 0]
+    skills["Skills Count"] = len(valid_skills)
+    skills["Skills Quality"] = "Strong" if len(valid_skills) >= 5 else "Moderate" if len(valid_skills) >= 3 else "Weak"
+    features["Skills Analysis"] = skills
+    
+    # === ATS COMPATIBILITY SCORE ===
+    compatibility_score = 0
+    max_score = 20
+    
+    # Keywords (8 points)
+    if field_keywords:
+        keyword_ratio = len([kw for kw in field_keywords if kw.lower() in text.lower()]) / len(field_keywords)
+        compatibility_score += keyword_ratio * 8
+    
+    # Headers (4 points)
+    header_ratio = len(found_headers) / len(standard_headers)
+    compatibility_score += header_ratio * 4
+    
+    # Formatting (3 points)
+    if "•" in text or "- " in text:
+        compatibility_score += 1
+    if not any(char in text for char in ["[", "]", "{", "}", "|", "~", "^"]):
+        compatibility_score += 1
+    if 500 <= len(text) <= 3000:
+        compatibility_score += 1
+    
+    # Contact (2 points)
+    if info['email'] != 'Not found':
+        compatibility_score += 1
+    if info['phone'] != 'Not found':
+        compatibility_score += 1
+    
+    # Experience (3 points)
+    if any(word in text.lower() for word in ["experience", "work", "employment"]):
+        compatibility_score += 1
+    if any(year in text for year in ["2024", "2023", "2022"]):
+        compatibility_score += 1
+    if any(word in text.lower() for word in ["company", "corporation", "inc", "ltd", "llc"]):
+        compatibility_score += 1
+    
+    features["ATS Compatibility Score"] = f"{compatibility_score:.1f}/{max_score} ({compatibility_score/max_score*100:.1f}%)"
+    
+    return features
+
 # --- Enhanced Personalized Tips ---
 def get_personalized_tips(text, info):
     """
@@ -1057,6 +1821,169 @@ def get_personalized_tips(text, info):
     # Limit to most important tips
     return tips[:6]
 
+# --- PDF Resume Generator ---
+def generate_pdf_resume(name, email, phone, linkedin, summary, skills, experience, education, projects, certifications, field):
+    """Generate a professional PDF resume with ATS-optimized formatting"""
+    # Lazy-import reportlab so the app can run even if reportlab is not installed
+    try:
+        import importlib
+        _pagesizes = importlib.import_module("reportlab.lib.pagesizes")
+        letter, A4 = _pagesizes.letter, _pagesizes.A4
+        _platypus = importlib.import_module("reportlab.platypus")
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle = (
+            _platypus.SimpleDocTemplate,
+            _platypus.Paragraph,
+            _platypus.Spacer,
+            _platypus.Table,
+            _platypus.TableStyle,
+        )
+        _styles = importlib.import_module("reportlab.lib.styles")
+        getSampleStyleSheet, ParagraphStyle = _styles.getSampleStyleSheet, _styles.ParagraphStyle
+        _units = importlib.import_module("reportlab.lib.units")
+        inch = _units.inch
+        colors = importlib.import_module("reportlab.lib.colors")
+        _enums = importlib.import_module("reportlab.lib.enums")
+        TA_CENTER, TA_LEFT, TA_JUSTIFY = _enums.TA_CENTER, _enums.TA_LEFT, _enums.TA_JUSTIFY
+    except Exception:
+        st.error("PDF generation requires the 'reportlab' package. Please install it: pip install reportlab")
+        return None
+    
+    # Create a buffer to store the PDF
+    buffer = BytesIO()
+    
+    # Create the PDF document
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=0.75*inch, leftMargin=0.75*inch, topMargin=0.75*inch, bottomMargin=0.75*inch)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    
+    # Create custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=6,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue,
+        fontName='Helvetica-Bold'
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=6,
+        spaceBefore=12,
+        textColor=colors.darkblue,
+        fontName='Helvetica-Bold',
+        borderWidth=1,
+        borderColor=colors.darkblue,
+        borderPadding=3
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6,
+        alignment=TA_JUSTIFY
+    )
+    
+    bullet_style = ParagraphStyle(
+        'CustomBullet',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=3,
+        leftIndent=20,
+        bulletIndent=10
+    )
+    
+    # Build the story (content)
+    story = []
+    
+    # Title
+    story.append(Paragraph(name.upper(), title_style))
+    story.append(Spacer(1, 6))
+    
+    # Contact Information
+    contact_info = f"{email} | {phone} | {linkedin}"
+    story.append(Paragraph(contact_info, normal_style))
+    story.append(Spacer(1, 12))
+    
+    # Professional Summary
+    story.append(Paragraph("PROFESSIONAL SUMMARY", heading_style))
+    story.append(Paragraph(summary, normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Technical Skills
+    story.append(Paragraph("TECHNICAL SKILLS", heading_style))
+    story.append(Paragraph(skills, normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Professional Experience
+    story.append(Paragraph("PROFESSIONAL EXPERIENCE", heading_style))
+    experience_lines = experience.split('\n')
+    for line in experience_lines:
+        if line.strip():
+            if line.strip().startswith('•'):
+                story.append(Paragraph(line.strip(), bullet_style))
+            else:
+                story.append(Paragraph(line.strip(), normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Education
+    story.append(Paragraph("EDUCATION", heading_style))
+    education_lines = education.split('\n')
+    for line in education_lines:
+        if line.strip():
+            if line.strip().startswith('•'):
+                story.append(Paragraph(line.strip(), bullet_style))
+            else:
+                story.append(Paragraph(line.strip(), normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Projects
+    story.append(Paragraph("PROJECTS", heading_style))
+    project_lines = projects.split('\n')
+    for line in project_lines:
+        if line.strip():
+            if line.strip().startswith('•'):
+                story.append(Paragraph(line.strip(), bullet_style))
+            else:
+                story.append(Paragraph(line.strip(), normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Certifications
+    story.append(Paragraph("CERTIFICATIONS & TRAINING", heading_style))
+    cert_lines = certifications.split('\n')
+    for line in cert_lines:
+        if line.strip():
+            if line.strip().startswith('•'):
+                story.append(Paragraph(line.strip(), bullet_style))
+            else:
+                story.append(Paragraph(line.strip(), normal_style))
+    story.append(Spacer(1, 6))
+    
+    # Additional Information
+    story.append(Paragraph("ADDITIONAL INFORMATION", heading_style))
+    additional_info = [
+        "• Proficient in Agile methodologies and project management tools",
+        "• Strong problem-solving skills with analytical mindset", 
+        "• Excellent communication and collaboration abilities",
+        "• Committed to continuous professional development"
+    ]
+    for info in additional_info:
+        story.append(Paragraph(info, bullet_style))
+    
+    # Build the PDF
+    doc.build(story)
+    
+    # Get the PDF content
+    pdf_content = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_content
+
 # --- YouTube Video Recommendation ---
 YOUTUBE_VIDEO = {
     "title": "How to Make a Resume Stand Out in 2024 (5 Tips)",
@@ -1117,13 +2044,7 @@ def course_relevance(course, missing_skills):
     return "✅ Must Have"
 
 
-# --- Streamlit Page Config ---
-st.set_page_config(
-    page_title="Resume Analyzer | Smart Feedback",
-    page_icon="🧑‍💼",
-    layout="wide",
-    initial_sidebar_state="auto"
-)
+# (Removed duplicate set_page_config; configured earlier)
 
 # --- Custom CSS for Neatness ---
 st.markdown(
@@ -1204,46 +2125,119 @@ ICON_VIDEO = "https://cdn-icons-png.flaticon.com/512/1384/1384060.png"
 ICON_SUGGEST = "https://cdn-icons-png.flaticon.com/512/1828/1828884.png"
 ICON_FEEDBACK = "https://cdn-icons-png.flaticon.com/512/1828/1828919.png"
 
-# --- User Greeting and Title ---
-st.markdown("""
-<div style='margin-bottom: 1.5em;'>
-  <h2 style='margin-bottom:0.2em;'>🤖 Welcome to <span style='color:#2575fc;'>ProFile Analyzer</span>!</h2>
-  <span style='font-size:1.1em; color:#4a5a6a;'>Upload your resume(s) and get instant, actionable feedback.</span>
-</div>
-""", unsafe_allow_html=True)
+files = st.session_state.get('uploaded_files_cache', [])
 
-st.title("🤖 ProFile Analyzer")
+if page == "Start / Upload":
+    # --- User Greeting and Title ---
+    st.markdown("""
+    <div style='margin-bottom: 1.5em;'>
+      <h2 style='margin-bottom:0.2em;'>🤖 Welcome to <span style='color:#2575fc;'>ProFile Analyzer</span>!</h2>
+      <span style='font-size:1.1em; color:#4a5a6a;'>Upload your resume(s) and get instant, actionable feedback.</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-# --- Pre-upload Guidelines ---
-with st.expander("📋 Upload Guidelines", expanded=False):
-    st.markdown(PRE_UPLOAD_GUIDELINES)
+    st.title("🤖 ProFile Analyzer")
 
-# --- Summary Row (Dashboard Cards) ---
-uploaded_files = st.file_uploader("📤 Upload Resume(s) (PDF/DOCX)", type=["pdf", "docx"], accept_multiple_files=True)
-st.markdown("<div class='st-bb'></div>", unsafe_allow_html=True)
+    # --- Pre-upload Guidelines ---
+    with st.expander("📋 Upload Guidelines", expanded=False):
+        st.markdown(PRE_UPLOAD_GUIDELINES)
 
-if uploaded_files:
-    tab_labels = [f"Resume {i+1}" for i in range(len(uploaded_files))]
+    # --- Uploader ---
+    uploaded_files = st.file_uploader(
+        "📤 Upload Resume(s) (PDF/DOCX)",
+        type=["pdf", "docx"],
+        accept_multiple_files=True,
+        key="uploader_multi"
+    )
+    # Controls for managing the upload library
+    cols_manage = st.columns([1,1,6])
+    with cols_manage[0]:
+        if st.button("♻️ Clear All", use_container_width=True):
+            st.session_state['uploaded_files_cache'] = []
+            files = []
+            st.rerun()
+    st.markdown("<div class='st-bb'></div>", unsafe_allow_html=True)
+
+    if uploaded_files:
+        # Merge newly uploaded files into existing cache instead of replacing
+        import hashlib
+        existing = st.session_state.get('uploaded_files_cache', []) or []
+        # Ensure existing entries have hashes for de-duplication
+        for e in existing:
+            if 'sha256' not in e:
+                try:
+                    e['sha256'] = hashlib.sha256(e.get('bytes', b"")).hexdigest()
+                except Exception:
+                    e['sha256'] = None
+
+        new_entries = []
+        for uf in uploaded_files:
+            try:
+                data = uf.read()
+            except Exception:
+                data = b""
+            sha = None
+            try:
+                sha = hashlib.sha256(data).hexdigest()
+            except Exception:
+                pass
+            new_item = {
+                'name': uf.name,
+                'ext': uf.name.split('.')[-1].lower(),
+                'bytes': data,
+                'sha256': sha,
+            }
+            # Skip duplicates by hash (or fallback to same name+size)
+            is_dup = False
+            for e in existing:
+                if (sha and e.get('sha256') == sha) or (e.get('name') == new_item['name'] and len(e.get('bytes', b"")) == len(data)):
+                    is_dup = True
+                    break
+            if not is_dup:
+                new_entries.append(new_item)
+
+        merged = existing + new_entries
+        st.session_state['uploaded_files_cache'] = merged
+        files = merged
+
+if files:
+    tab_labels = [f"Resume {i+1}" for i in range(len(files))]
     tabs = st.tabs(tab_labels)
-    for idx, uploaded in enumerate(uploaded_files):
+    for idx, uploaded in enumerate(files):
         with tabs[idx]:
             st.markdown(f"<div class='st-section'>", unsafe_allow_html=True)
             st.image(ICON_RESUME, width=48)
             st.markdown(f"### 📄 <span class='st-emoji'>Resume {idx+1}</span>", unsafe_allow_html=True)
-            # Determine file type and save accordingly
-            file_extension = uploaded.name.split('.')[-1].lower()
-            temp_file_path = f"temp_resume_{idx}.{file_extension}"
-            
-            with open(temp_file_path, "wb") as f:
-                f.write(uploaded.read())
-            
-            # Extract text based on file type
-            if file_extension == "pdf":
-                text = extract_text_from_pdf(temp_file_path)
-            elif file_extension == "docx":
-                text = extract_text_from_docx(temp_file_path)
+
+            # Build temp file from cached bytes or live upload
+            if isinstance(uploaded, dict):
+                file_extension = uploaded.get('ext', 'pdf')
+                data_bytes = uploaded.get('bytes', b"")
             else:
-                text = ""
+                file_extension = uploaded.name.split('.')[-1].lower()
+                try:
+                    data_bytes = uploaded.read()
+                except Exception:
+                    data_bytes = b""
+            temp_file_path = f"temp_resume_{idx}.{file_extension}"
+            with open(temp_file_path, "wb") as f:
+                f.write(data_bytes)
+            
+            # Extract text based on file type (with cache and spinner)
+            import hashlib
+            file_hash = hashlib.sha256(data_bytes).hexdigest()
+            cache_key = f"parsed_text_{file_hash}"
+            if cache_key in st.session_state:
+                text = st.session_state[cache_key]
+            else:
+                with st.spinner("Parsing resume…"):
+                    if file_extension == "pdf":
+                        text = extract_text_from_pdf(temp_file_path)
+                    elif file_extension == "docx":
+                        text = extract_text_from_docx(temp_file_path)
+                    else:
+                        text = ""
+                st.session_state[cache_key] = text
             
             # Validate resume format
             format_warnings = validate_resume_format(text)
@@ -1255,78 +2249,282 @@ if uploaded_files:
             info = extract_info(text)
             field = detect_field(text)
 
-            # --- Sliders for dynamic display ---
-            skill_count = st.slider("How many skills to show?", 1, 10, 1, key=f"skill_slider_{idx}")
-            cert_count = st.slider("How many certifications to show?", 1, 10, 1, key=f"cert_slider_{idx}")
-            proj_count = st.slider("How many project ideas to show?", 1, 10, 1, key=f"proj_slider_{idx}")
+            # --- Fixed counts for display (removed sliders) ---
+            skill_count = 10
+            cert_count = 10
+            proj_count = 10
 
-            # --- Extracted Info Block (Expander) ---
-            with st.expander("🔍 Extracted Info", expanded=False):
-                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
-                st.image(ICON_FEEDBACK, width=32)
-                st.write(f"👤 Name: {info['name']}")
-                st.write(f"✉ Email: {info['email']}")
-                st.write(f"📞 Phone: {info['phone']}")
-                st.write(f"🎓 Education: {', '.join(info['education'])}")
-                st.write(f"🛠 Skills: {', '.join(info['skills'][:skill_count])}")
-                st.write(f"📄 Certifications: {', '.join(info['certifications'][:cert_count])}")
-                st.write(f"🔗 LinkedIn: {info['linkedin']}")
-                st.write(f"🐙 GitHub: {info['github']}")
-                st.write(f"🌐 Portfolio: {info['portfolio']}")
-                st.write(f"💼 Predicted Field: {field}")
-                st.markdown("</div>", unsafe_allow_html=True)
+            # --- Extracted/Edit panels (mutually exclusive) ---
+            if page == "Edit & Build":
+                panel_opts = ["Extracted Info", "Edit Info"]
+                panel_key = f"edit_active_panel_{idx}"
+                if panel_key not in st.session_state:
+                    st.session_state[panel_key] = panel_opts[0]
+                st.session_state[panel_key] = st.radio(
+                    "Edit Panels",
+                    panel_opts,
+                    index=panel_opts.index(st.session_state[panel_key]),
+                    horizontal=True,
+                    key=f"edit_panel_radio_{idx}"
+                )
+
+            # --- Extracted Info Block (Edit & Build page) ---
+            if page == "Edit & Build":
+                with st.expander("🔍 Extracted Info", expanded=(st.session_state.get(panel_key)=="Extracted Info")):
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.image(ICON_FEEDBACK, width=32)
+                    st.write(f"👤 Name: {info['name']}")
+                    st.write(f"✉ Email: {info['email']}")
+                    st.write(f"📞 Phone: {info['phone']}")
+                    st.write(f"🎓 Education: {', '.join(info['education'])}")
+                    st.write(f"🛠 Skills: {', '.join(info['skills'][:skill_count])}")
+                    st.write(f"📄 Certifications: {', '.join(info['certifications'][:cert_count])}")
+                    # Clickable links
+                    def linkify(label, url):
+                        return f"{label}: <a href='{url}' target='_blank'>{url}</a>" if url and url != 'Not found' else f"{label}: Not found"
+                    st.markdown(linkify("🔗 LinkedIn", info['linkedin']), unsafe_allow_html=True)
+                    st.markdown(linkify("🐙 GitHub", info['github']), unsafe_allow_html=True)
+                    st.markdown(linkify("🌐 Portfolio", info['portfolio']), unsafe_allow_html=True)
+                    # Projects truncated with tooltip
+                    def trunc_title(t):
+                        return t if len(t) <= 40 else t[:37] + '…'
+                    projs = info.get('projects', [])[:proj_count]
+                    if projs and projs[0] != 'Not found':
+                        st.markdown("**📦 Projects:**", unsafe_allow_html=True)
+                        for p in projs:
+                            st.markdown(f"<span title='{p}'>• {trunc_title(p)}</span>", unsafe_allow_html=True)
+                    else:
+                        st.info("No projects detected. Add a 'Projects' section with 2–3 project titles.")
+                    st.write(f"💼 Predicted Field: {field}")
+                    st.markdown("</div>", unsafe_allow_html=True)
             
-            # --- Manual Edit Section ---
-            with st.expander("✏ Edit Extracted Information", expanded=False):
-                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
-                st.markdown("*Edit any incorrectly extracted information:*")
-                
-                # Create session state for edited info
-                if f'edited_info_{idx}' not in st.session_state:
-                    st.session_state[f'edited_info_{idx}'] = info.copy()
-                
-                edited_info = st.session_state[f'edited_info_{idx}']
-                
-                # Editable fields
-                edited_info['name'] = st.text_input("Name:", value=edited_info['name'], key=f"name_{idx}")
-                edited_info['email'] = st.text_input("Email:", value=edited_info['email'], key=f"email_{idx}")
-                edited_info['phone'] = st.text_input("Phone:", value=edited_info['phone'], key=f"phone_{idx}")
-                edited_info['linkedin'] = st.text_input("LinkedIn:", value=edited_info['linkedin'], key=f"linkedin_{idx}")
-                edited_info['github'] = st.text_input("GitHub:", value=edited_info['github'], key=f"github_{idx}")
-                edited_info['portfolio'] = st.text_input("Portfolio:", value=edited_info['portfolio'], key=f"portfolio_{idx}")
-                
-                # Skills editing
-                st.markdown("*Skills (one per line):*")
-                skills_text = st.text_area("Skills:", value="\n".join(edited_info['skills'] if edited_info['skills'] != ["Not found"] else []), key=f"skills_{idx}")
-                edited_info['skills'] = [s.strip() for s in skills_text.split('\n') if s.strip()]
-                
-                # Certifications editing
-                st.markdown("*Certifications (one per line):*")
-                certs_text = st.text_area("Certifications:", value="\n".join(edited_info['certifications'] if edited_info['certifications'] != ["Not found"] else []), key=f"certs_{idx}")
-                edited_info['certifications'] = [c.strip() for c in certs_text.split('\n') if c.strip()]
-                
-                # Education editing
-                st.markdown("*Education (one per line):*")
-                edu_text = st.text_area("Education:", value="\n".join(edited_info['education'] if edited_info['education'] != ["Not found"] else []), key=f"edu_{idx}")
-                edited_info['education'] = [e.strip() for e in edu_text.split('\n') if e.strip()]
-                
-                # Update session state
-                st.session_state[f'edited_info_{idx}'] = edited_info
-                
-                # Use edited info for scoring if user has made changes
-                if st.button("Update Analysis with Edited Info", key=f"update_{idx}"):
-                    info = edited_info
-                    field = detect_field(" ".join(edited_info['skills']))
-                
-                st.markdown("</div>", unsafe_allow_html=True)
 
-            # --- Resume Score Block ---
-            with st.container():
-                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
-                resume_score, score_breakdown = dynamic_resume_score(text, info, field)
-                st.markdown(f'<div class="score-badge">{resume_score}/100</div>', unsafe_allow_html=True)
-                st.image(ICON_FEEDBACK, width=32)
-                st.progress(resume_score / 100)
+            # --- ATS Score Display (Before Editing) ---
+            if page == "Edit & Build":
+                st.markdown("### 📊 **Current ATS Score**")
+                current_score, current_breakdown = dynamic_resume_score(text, info, field)
+                
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.markdown(f'<div class="score-badge">{current_score}/100</div>', unsafe_allow_html=True)
+                    st.progress(current_score / 100)
+                    
+                    # Score interpretation
+                    if current_score >= 85:
+                        st.success("🎯 *Excellent!* Your resume meets professional standards.")
+                    elif current_score >= 75:
+                        st.success("✅ *Strong Resume!* Minor improvements can make it outstanding.")
+                    elif current_score >= 65:
+                        st.info("📈 *Good Foundation!* Focus on the areas below for better results.")
+                    elif current_score >= 50:
+                        st.warning("⚠ *Needs Improvement.* Consider the suggestions below.")
+                    else:
+                        st.error("🔴 *Requires Major Updates.* Follow the recommendations below.")
+                
+                # Store original score for comparison
+                st.session_state[f'original_score_{idx}'] = current_score
+                st.session_state[f'original_breakdown_{idx}'] = current_breakdown
+            
+            # --- Manual Edit Section (Edit & Build page) ---
+            if page == "Edit & Build":
+                with st.expander("✏ Edit Extracted Information", expanded=(st.session_state.get(panel_key)=="Edit Info")):
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.markdown("*Edit any incorrectly extracted information:*")
+                    
+                    # Create session state for edited info
+                    if f'edited_info_{idx}' not in st.session_state:
+                        st.session_state[f'edited_info_{idx}'] = info.copy()
+                    
+                    edited_info = st.session_state[f'edited_info_{idx}']
+                    
+                    # Editable fields
+                    edited_info['name'] = st.text_input("Name:", value=edited_info['name'], key=f"name_{idx}")
+                    edited_info['email'] = st.text_input("Email:", value=edited_info['email'], key=f"email_{idx}")
+                    edited_info['phone'] = st.text_input("Phone:", value=edited_info['phone'], key=f"phone_{idx}")
+                    edited_info['linkedin'] = st.text_input("LinkedIn:", value=edited_info['linkedin'], key=f"linkedin_{idx}")
+                    edited_info['github'] = st.text_input("GitHub:", value=edited_info['github'], key=f"github_{idx}")
+                    edited_info['portfolio'] = st.text_input("Portfolio:", value=edited_info['portfolio'], key=f"portfolio_{idx}")
+                    
+                    # Skills editing with suggestions
+                    st.markdown("*Skills (one per line):*")
+                    
+                    # Get current skills text first
+                    current_skills_text = st.session_state.get(f"skills_text_{idx}", "\n".join(edited_info['skills'] if edited_info['skills'] != ["Not found"] else []))
+                    
+                    # Show suggested skills for the field
+                    field_skills = SKILL_KEYWORDS.get(field, [])
+                    if field_skills:
+                        st.markdown(f"**💡 Suggested skills for {field}:**")
+                        current_skills_list = [s.strip() for s in current_skills_text.split('\n') if s.strip()]
+                        suggested_skills = [skill for skill in field_skills[:10] if skill.lower() not in [s.lower() for s in current_skills_list]]
+                        if suggested_skills:
+                            cols = st.columns(3)
+                            for i, skill in enumerate(suggested_skills[:9]):
+                                with cols[i % 3]:
+                                    if st.button(f"+ {skill}", key=f"suggest_skill_{skill}_{idx}", help=f"Add {skill} to your skills"):
+                                        if skill not in current_skills_list:
+                                            current_skills_list.append(skill)
+                                            st.session_state[f"skills_text_{idx}"] = "\n".join(current_skills_list)
+                                            st.rerun()
+                    
+                    skills_text = st.text_area("Skills:", value=current_skills_text, key=f"skills_{idx}")
+                    edited_info['skills'] = [s.strip() for s in skills_text.split('\n') if s.strip()]
+                    
+                    # Certifications editing with suggestions
+                    st.markdown("*Certifications (one per line):*")
+                    
+                    # Get current certifications text first
+                    current_certs_text = st.session_state.get(f"certs_text_{idx}", "\n".join(edited_info['certifications'] if edited_info['certifications'] != ["Not found"] else []))
+                    
+                    # Show suggested certifications for the field
+                    field_certs = CERTIFICATIONS.get(field, [])
+                    if field_certs:
+                        st.markdown(f"**🏆 Suggested certifications for {field}:**")
+                        current_certs_list = [c.strip() for c in current_certs_text.split('\n') if c.strip()]
+                        suggested_certs = [cert for cert in field_certs[:6] if cert.lower() not in [c.lower() for c in current_certs_list]]
+                        if suggested_certs:
+                            cols = st.columns(2)
+                            for i, cert in enumerate(suggested_certs[:6]):
+                                with cols[i % 2]:
+                                    if st.button(f"+ {cert}", key=f"suggest_cert_{cert}_{idx}", help=f"Add {cert} to your certifications"):
+                                        if cert not in current_certs_list:
+                                            current_certs_list.append(cert)
+                                            st.session_state[f"certs_text_{idx}"] = "\n".join(current_certs_list)
+                                            st.rerun()
+                    
+                    certs_text = st.text_area("Certifications:", value=current_certs_text, key=f"certs_{idx}")
+                    edited_info['certifications'] = [c.strip() for c in certs_text.split('\n') if c.strip()]
+                    
+                    # Education editing
+                    st.markdown("*Education (one per line):*")
+                    edu_text = st.text_area("Education:", value="\n".join(edited_info['education'] if edited_info['education'] != ["Not found"] else []), key=f"edu_{idx}")
+                    edited_info['education'] = [e.strip() for e in edu_text.split('\n') if e.strip()]
+                    
+                    # Update session state
+                    st.session_state[f'edited_info_{idx}'] = edited_info
+                    
+                    # Use edited info for scoring if user has made changes
+                    if st.button("🔄 Update Analysis with Edited Info", key=f"update_{idx}"):
+                        info = edited_info
+                        field = detect_field(" ".join(edited_info['skills']))
+                        # Set flag to show updated score
+                        st.session_state[f'score_updated_{idx}'] = True
+                        st.success("✅ Analysis updated with your changes!")
+                        st.rerun()
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+            # --- Updated ATS Score Display (After Editing) ---
+            # Only show updated score if user has clicked "Update Analysis" button
+            if page == "Edit & Build" and f'edited_info_{idx}' in st.session_state and st.session_state.get(f'score_updated_{idx}', False):
+                st.markdown("### 📈 **Updated ATS Score**")
+                
+                # Calculate updated score with edited info
+                updated_info = st.session_state[f'edited_info_{idx}']
+                updated_field = detect_field(" ".join(updated_info['skills']))
+                updated_score, updated_breakdown = dynamic_resume_score(text, updated_info, updated_field)
+                
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.markdown(f'<div class="score-badge">{updated_score}/100</div>', unsafe_allow_html=True)
+                    st.progress(updated_score / 100)
+                    
+                    # Show improvement
+                    original_score = st.session_state.get(f'original_score_{idx}', 0)
+                    improvement = updated_score - original_score
+                    
+                    if improvement > 0:
+                        st.success(f"🎉 **+{improvement} points improvement!** Your edits made the resume stronger.")
+                    elif improvement < 0:
+                        st.warning(f"⚠️ **{improvement} points decrease.** Consider reviewing your changes.")
+                    else:
+                        st.info("📊 **No change in score.** Your edits maintained the current quality.")
+                    
+                    # Score interpretation
+                    if updated_score >= 85:
+                        st.success("🎯 *Excellent!* Your resume meets professional standards.")
+                    elif updated_score >= 75:
+                        st.success("✅ *Strong Resume!* Minor improvements can make it outstanding.")
+                    elif updated_score >= 65:
+                        st.info("📈 *Good Foundation!* Focus on the areas below for better results.")
+                    elif updated_score >= 50:
+                        st.warning("⚠ *Needs Improvement.* Consider the suggestions below.")
+                    else:
+                        st.error("🔴 *Requires Major Updates.* Follow the recommendations below.")
+                
+                # Detailed comparison
+                with st.expander("📊 **Score Comparison Breakdown**", expanded=False):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("**Original Score:**")
+                        original_breakdown = st.session_state.get(f'original_breakdown_{idx}', {})
+                        for category, points in original_breakdown.items():
+                            if category != "Total Score":
+                                # Ensure points is a number, not a dict
+                                if isinstance(points, (int, float)):
+                                    points_value = points
+                                else:
+                                    points_value = 0
+                                st.metric(category, f"{points_value} pts")
+                    
+                    with col2:
+                        st.markdown("**Updated Score:**")
+                        for category, points in updated_breakdown.items():
+                            if category != "Total Score":
+                                # Ensure points is a number, not a dict
+                                if isinstance(points, (int, float)):
+                                    points_value = points
+                                else:
+                                    points_value = 0
+                                
+                                # Ensure original points is also a number
+                                original_points = original_breakdown.get(category, 0)
+                                if isinstance(original_points, (int, float)):
+                                    original_value = original_points
+                                else:
+                                    original_value = 0
+                                
+                                change = points_value - original_value
+                                delta_color = "normal" if change == 0 else "inverse" if change < 0 else "normal"
+                                st.metric(category, f"{points_value} pts", delta=f"{change:+.1f}" if change != 0 else None)
+
+            # --- Resume Score Block (ATS Compatibility page) ---
+            if page == "ATS Compatibility":
+                with st.container():
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    
+                    # Use updated info if available, otherwise use original
+                    if f'edited_info_{idx}' in st.session_state and st.session_state.get(f'score_updated_{idx}', False):
+                        # Use updated information for scoring
+                        updated_info = st.session_state[f'edited_info_{idx}']
+                        updated_field = detect_field(" ".join(updated_info['skills']))
+                        resume_score, score_breakdown = dynamic_resume_score(text, updated_info, updated_field)
+                        st.info("📊 **Analysis based on your updated resume information**")
+                    else:
+                        # Use original information for scoring
+                        resume_score, score_breakdown = dynamic_resume_score(text, info, field)
+                        st.info("📊 **Analysis based on original resume information**")
+                    
+                    st.markdown(f'<div class="score-badge">{resume_score}/100</div>', unsafe_allow_html=True)
+                    st.image(ICON_FEEDBACK, width=32)
+                    st.progress(resume_score / 100)
+
+                    # Mutual-exclusive panel selector
+                    panel_options = [
+                        "Score Breakdown",
+                        "ATS Feature Analysis",
+                        "Enhancement Guide",
+                    ]
+                    if "ats_active_panel" not in st.session_state:
+                        st.session_state["ats_active_panel"] = panel_options[0]
+                    st.session_state["ats_active_panel"] = st.radio(
+                        "Panels",
+                        panel_options,
+                        index=panel_options.index(st.session_state["ats_active_panel"]),
+                        horizontal=True,
+                        key=f"ats_panel_{idx}",
+                    )
                 
                 # Score interpretation
                 if resume_score >= 85:
@@ -1341,14 +2539,197 @@ if uploaded_files:
                     st.error("🔴 *Requires Major Updates.* Follow the recommendations below.")
                 
                 # Detailed Score Breakdown
-                with st.expander("📊 *Detailed Score Breakdown*", expanded=False):
+                with st.expander("📊 **Detailed Score Breakdown**", expanded=(st.session_state.get("ats_active_panel") == "Score Breakdown")):
+                    # Define maximum points for each category
+                    max_points = {
+                        "Content Completeness": 20,
+                        "Skills Assessment": 25,
+                        "Experience & Impact": 20,
+                        "Professional Presentation": 15,
+                        "ATS Optimization": 20,
+                        "Bonus Points": 10,
+                        "Total Score": 100
+                    }
+                    
+                    # Show scoring structure overview
+                    st.markdown("**📋 Scoring Structure Overview:**")
+                    st.markdown("Our comprehensive 100-point scoring system evaluates your resume across key areas:")
+                    
+                    scoring_overview = [
+                        "🎯 **Content Completeness** (20 pts): Essential & optional sections",
+                        "🛠️ **Skills Assessment** (25 pts): Quantity & field relevance", 
+                        "💼 **Experience & Impact** (20 pts): Action verbs & measurable results",
+                        "✨ **Professional Presentation** (15 pts): Contact info, formatting & credentials",
+                        "🔍 **ATS Optimization** (20 pts): Keyword matching & ATS compatibility",
+                        "🎁 **Bonus Points** (10 pts): Projects, portfolio links & recent experience"
+                    ]
+                    
+                    for item in scoring_overview:
+                        st.markdown(f"• {item}")
+                    
+                    st.markdown("---")
+                    
                     col1, col2 = st.columns(2)
                     with col1:
                         for category, points in list(score_breakdown.items())[:3]:
-                            st.metric(category, f"{points} pts")
+                            if category != "ATS Details":
+                                max_pts = max_points.get(category, 100)
+                                # Color coding based on performance
+                                if points >= max_pts * 0.8:  # 80% or higher
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Excellent", delta_color="normal")
+                                elif points >= max_pts * 0.6:  # 60-79%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Good", delta_color="normal")
+                                elif points >= max_pts * 0.4:  # 40-59%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Needs Work", delta_color="inverse")
+                                else:  # Below 40%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Poor", delta_color="inverse")
                     with col2:
                         for category, points in list(score_breakdown.items())[3:]:
-                            st.metric(category, f"{points} pts")
+                            if category != "ATS Details":
+                                max_pts = max_points.get(category, 100)
+                                # Color coding based on performance
+                                if points >= max_pts * 0.8:  # 80% or higher
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Excellent", delta_color="normal")
+                                elif points >= max_pts * 0.6:  # 60-79%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Good", delta_color="normal")
+                                elif points >= max_pts * 0.4:  # 40-59%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Needs Work", delta_color="inverse")
+                                else:  # Below 40%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Poor", delta_color="inverse")
+                
+                # ATS Detailed Breakdown (ATS Compatibility page)
+                if "ATS Details" in score_breakdown:
+                    with st.expander("🎯 **ATS Optimization Details**", expanded=False):
+                        st.markdown("**Applicant Tracking System (ATS) Compatibility Analysis:**")
+                        ats_details = score_breakdown["ATS Details"]
+                        
+                        # Define maximum points for ATS categories
+                        ats_max_points = {
+                            "Keyword Match": 8,
+                            "Section Headers": 4,
+                            "Format Compatibility": 3,
+                            "Contact Info": 2,
+                            "Experience Details": 3
+                        }
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            for category, points in list(ats_details.items())[:3]:
+                                max_pts = ats_max_points.get(category, 10)
+                                # Color coding based on ATS performance
+                                if points >= max_pts * 0.8:  # 80% or higher
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Excellent", delta_color="normal")
+                                elif points >= max_pts * 0.6:  # 60-79%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Good", delta_color="normal")
+                                elif points >= max_pts * 0.4:  # 40-59%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Needs Work", delta_color="inverse")
+                                else:  # Below 40%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Poor", delta_color="inverse")
+                        with col2:
+                            for category, points in list(ats_details.items())[3:]:
+                                max_pts = ats_max_points.get(category, 10)
+                                # Color coding based on ATS performance
+                                if points >= max_pts * 0.8:  # 80% or higher
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Excellent", delta_color="normal")
+                                elif points >= max_pts * 0.6:  # 60-79%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Good", delta_color="normal")
+                                elif points >= max_pts * 0.4:  # 40-59%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Needs Work", delta_color="inverse")
+                                else:  # Below 40%
+                                    st.metric(category, f"{points}/{max_pts} pts", delta="Poor", delta_color="inverse")
+                        
+                        # ATS Recommendations
+                        st.markdown("**ATS Optimization Tips:**")
+                        ats_tips = []
+                        if ats_details.get("Keyword Match", 0) < 4:
+                            ats_tips.append("🔍 **Add more field-specific keywords** to improve ATS matching")
+                        if ats_details.get("Section Headers", 0) < 2:
+                            ats_tips.append("📋 **Use standard section headers** like 'Experience', 'Education', 'Skills'")
+                        if ats_details.get("Format Compatibility", 0) < 2:
+                            ats_tips.append("📄 **Use simple formatting** - avoid special characters and complex layouts")
+                        if ats_details.get("Contact Info", 0) < 2:
+                            ats_tips.append("📞 **Include complete contact information** for ATS parsing")
+                        if ats_details.get("Experience Details", 0) < 2:
+                            ats_tips.append("💼 **Add detailed work experience** with dates and company names")
+                        
+                        for tip in ats_tips:
+                            st.markdown(f"• {tip}")
+                
+                # Comprehensive ATS Feature Analysis (compact, two-column layout)
+                ats_features = extract_ats_features(text, info, field)
+                with st.expander("🔍 **Comprehensive ATS Feature Analysis**", expanded=(st.session_state.get("ats_active_panel") == "ATS Feature Analysis")):
+                    st.markdown("<div class='card'>", unsafe_allow_html=True)
+                    col1, col2 = st.columns([1,1])
+
+                    # Left column: Keywords + Headers + Contact
+                    with col1:
+                        # Keyword Analysis (compact)
+                        keywords_found = ats_features.get("Keywords Found", [])
+                        match_rate = ats_features.get('Keyword Match Rate', '0/0')
+                        st.markdown("<div class='kpi'>", unsafe_allow_html=True)
+                        st.markdown("<div class='title'>Keyword Match</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='value'>{match_rate}</div>", unsafe_allow_html=True)
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                        if keywords_found:
+                            top_kw = "".join([f"<span class='pill'>{kw}</span>" for kw in keywords_found[:6]])
+                            st.markdown(f"**Top Keywords:** {top_kw}", unsafe_allow_html=True)
+                        else:
+                            st.markdown("<span class='pill bad'>No field keywords</span>", unsafe_allow_html=True)
+
+                        # Section headers (compact)
+                        st.markdown(f"**📋 Headers:** {ats_features.get('Header Compliance', 'Unknown')}")
+                        headers = ats_features.get("Standard Headers Found", [])
+                        if headers:
+                            pills = "".join([f"<span class='pill good'>{h.title()}</span>" for h in headers])
+                            st.markdown("**Found:** " + pills, unsafe_allow_html=True)
+
+                        # Contact info (inline)
+                        contact_info = ats_features.get("Contact Information", {})
+                        if contact_info:
+                            items = [f"<span class='pill {'good' if v=='Present' else 'bad'}'>{k}</span>" for k, v in contact_info.items()]
+                            st.markdown("**📞 Contact:** " + " ".join(items), unsafe_allow_html=True)
+
+                    # Right column: Formatting + Experience + Skills + Score
+                    with col2:
+                        # Formatting (inline)
+                        formatting = ats_features.get("Formatting", {})
+                        if formatting:
+                            pills = []
+                            for k, v in formatting.items():
+                                status_class = 'good' if any(word in v for word in ['Present', 'Clean', 'Optimal']) else 'warn'
+                                pills.append(f"<span class='pill {status_class}'>{k}: {v}</span>")
+                            st.markdown("**📄 Formatting:** " + " ".join(pills), unsafe_allow_html=True)
+
+                        # Experience (inline)
+                        experience = ats_features.get("Experience Details", {})
+                        if experience:
+                            items = [f"<span class='pill {'good' if v=='Present' else 'bad'}'>{k}</span>" for k, v in experience.items()]
+                            st.markdown("**💼 Experience:** " + " ".join(items), unsafe_allow_html=True)
+
+                        # Skills summary
+                        skills = ats_features.get("Skills Analysis", {})
+                        st.markdown(f"**🛠️ Skills:** <span class='pill'>{skills.get('Skills Count', 0)} total</span> <span class='pill'>{skills.get('Skills Quality', 'Unknown')}</span>", unsafe_allow_html=True)
+
+                        # Overall score
+                        score_text = ats_features.get('ATS Compatibility Score', '0/20')
+                        st.markdown(f"**🎯 ATS Score:** {score_text}")
+                        try:
+                            ats_score_value = float(score_text.split('/')[0])
+                        except Exception:
+                            ats_score_value = 0.0
+                        pct = min(100, max(0, int((ats_score_value/20)*100)))
+                        st.markdown(f"<div class='scorebar'><div style='width:{pct}%;'></div></div>", unsafe_allow_html=True)
+                    if ats_score_value >= 16:
+                            st.markdown("<span class='pill good'>Excellent</span>", unsafe_allow_html=True)
+                    elif ats_score_value >= 12:
+                            st.markdown("<span class='pill'>Good</span>", unsafe_allow_html=True)
+                    elif ats_score_value >= 8:
+                            st.markdown("<span class='pill warn'>Moderate</span>", unsafe_allow_html=True)
+                    else:
+                            st.markdown("<span class='pill bad'>Low</span>", unsafe_allow_html=True)
+
+                    st.markdown("</div>", unsafe_allow_html=True)
                 
                 # Strengths and Weaknesses
                 strengths, weaknesses = get_strengths_weaknesses(text, info)
@@ -1371,33 +2752,963 @@ if uploaded_files:
                 
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            # --- Strengths & Areas for Improvement Block ---
-            with st.container():
+    # ---- Multi-Resume Comparison (when 2+ files) ----
+    if len(files) >= 2:
+        st.markdown("---")
+        st.subheader("🔗 Compare Resumes")
+        st.markdown("Quickly compare ATS scores and details across your uploads.")
+
+        # Parse all resumes once and cache text + base info and score
+        parsed_cache = st.session_state.get('multi_parsed_cache', {})
+        scores_cache = st.session_state.get('multi_scores_cache', {})
+
+        def _ensure_parsed(i, uploaded_item):
+            if i in parsed_cache:
+                return parsed_cache[i]
+            if isinstance(uploaded_item, dict):
+                file_extension = uploaded_item.get('ext', 'pdf')
+                data_bytes = uploaded_item.get('bytes', b"")
+                filename = uploaded_item.get('name', f"resume_{i}.{file_extension}")
+            else:
+                file_extension = uploaded_item.name.split('.')[-1].lower()
+                try:
+                    data_bytes = uploaded_item.read()
+                except Exception:
+                    data_bytes = b""
+                filename = uploaded_item.name
+            temp_path = f"temp_resume_{i}.{file_extension}"
+            with open(temp_path, "wb") as f:
+                f.write(data_bytes)
+            if file_extension == "pdf":
+                text_i = extract_text_from_pdf(temp_path)
+            elif file_extension == "docx":
+                text_i = extract_text_from_docx(temp_path)
+            else:
+                text_i = ""
+            info_i = extract_info(text_i)
+            field_i = detect_field(text_i)
+            parsed_cache[i] = {
+                'name': filename,
+                'text': text_i,
+                'info': info_i,
+                'field': field_i,
+            }
+            return parsed_cache[i]
+
+        # Build summary list
+        summary_rows = []
+        for i, up in enumerate(files):
+            data_i = _ensure_parsed(i, up)
+            if i not in scores_cache:
+                s, br = dynamic_resume_score(data_i['text'], data_i['info'], data_i['field'])
+                scores_cache[i] = {'score': s, 'breakdown': br}
+            summary_rows.append({
+                'Index': i,
+                'File': data_i['name'],
+                'Field': data_i['field'],
+                'Score': scores_cache[i]['score'],
+            })
+
+        # Persist caches
+        st.session_state['multi_parsed_cache'] = parsed_cache
+        st.session_state['multi_scores_cache'] = scores_cache
+
+        # Summary table
+        import pandas as pd
+        df = pd.DataFrame(summary_rows)
+        df_display = df.sort_values(by='Score', ascending=False).reset_index(drop=True)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+        # Side-by-side detailed comparison
+        st.markdown("### Side-by-side details")
+        colA, colB = st.columns(2)
+        with colA:
+            left_idx = st.selectbox("Left resume", options=list(range(len(files))), format_func=lambda i: parsed_cache[i]['name'], key='cmp_left')
+        with colB:
+            right_idx = st.selectbox("Right resume", options=list(range(len(files))), format_func=lambda i: parsed_cache[i]['name'], key='cmp_right')
+
+        if left_idx != right_idx:
+            l = parsed_cache[left_idx]; r = parsed_cache[right_idx]
+            ls = scores_cache[left_idx]['score']; rs = scores_cache[right_idx]['score']
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**{l['name']}**")
+                st.markdown(f"Score: {ls}/100")
+                st.markdown(f"Field: {l['field']}")
+                st.markdown("**Top skills:** " + ", ".join(l['info'].get('skills', [])[:10]))
+                st.markdown("**Certifications:** " + ", ".join(l['info'].get('certifications', [])[:6]))
+            with c2:
+                st.markdown(f"**{r['name']}**")
+                st.markdown(f"Score: {rs}/100")
+                st.markdown(f"Field: {r['field']}")
+                st.markdown("**Top skills:** " + ", ".join(r['info'].get('skills', [])[:10]))
+                st.markdown("**Certifications:** " + ", ".join(r['info'].get('certifications', [])[:6]))
+        else:
+            st.info("Select two different resumes to compare.")
+
+            # --- Strengths & Areas for Improvement Block (Insights page) ---
+            if page == "Insights":
+                with st.container():
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.markdown("<span class='st-emoji'>👍</span> <b>Strengths:</b>", unsafe_allow_html=True)
+                    st.image(ICON_SUGGEST, width=28)
+                    strengths = []
+                    if 'contact' in text.lower(): strengths.append("Clean layout, contact info present")
+                    if any(s in [sk.lower() for sk in info['skills']] for s in ["python", "ml", "machine learning"]): strengths.append("Technical terms like 'Python', 'ML' appear")
+                    if 'projects' in text.lower(): strengths.append("Projects section included")
+                    for s in strengths:
+                        st.markdown(f"• {s}")
+                    st.markdown("<span class='st-emoji'>👎</span> <b>Areas for Improvement:</b>", unsafe_allow_html=True)
+                    st.markdown("• Did You Know? Adding actionable metrics (e.g. 'Improved X by 20%') increases readability")
+                    st.markdown("• Tip: Add a 'Projects' section with 2–3 real-world examples")
+                    if info['linkedin'] == 'Not found':
+                        st.markdown("• Tip: Add your LinkedIn URL")
+                    if 'certifications' not in text.lower():
+                        st.markdown("• Tip: Include a 'Certifications' section")
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+            # --- Missing Skills & Recommended Courses Block (Insights page) ---
+            if page == "Insights":
+                with st.expander("✅ Missing Skills & Recommended Courses", expanded=False):
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.image(ICON_SKILLS, width=32)
+                    # Determine current field and skills
+                    current_skills = [s.lower() for s in info['skills'] if s != 'Not found']
+                    current_field = detect_field(current_skills)
+                    field_skills = [s.lower() for s in SKILL_KEYWORDS.get(current_field, [])]
+                    # Compute missing skills relative to field
+                    missing = [s for s in field_skills if s not in current_skills]
+                    if missing:
+                        st.markdown("**❌ Missing Field Skills:** " + ", ".join(ms.title() for ms in missing[:8]))
+                    else:
+                        st.markdown("**✅ You cover the key field skills.**")
+                    # Recommended courses based on field
+                    field_courses = COURSES.get(current_field, [])
+                    if field_courses:
+                        st.markdown("**📚 Recommended Courses:**")
+                        for i, course in enumerate(field_courses[:5], 1):
+                            provider = course.split(' – ')[-1] if ' – ' in course else 'Various'
+                            st.markdown(f"{i}. {course} — <span class='pill'>{provider}</span>", unsafe_allow_html=True)
+                    # Recommended certifications
+                    field_certs = CERTIFICATIONS.get(current_field, [])
+                    if field_certs:
+                        st.markdown("**🏆 Relevant Certifications:** " + ", ".join(field_certs[:5]))
+
+            # --- Comprehensive Resume Enhancement Recommendations (slides via tabs) ---
+            if page == "ATS Compatibility":
+                with st.expander("🚀 **Comprehensive Resume Enhancement Guide**", expanded=(st.session_state.get("ats_active_panel") == "Enhancement Guide")):
+                    t1, t2, t3, t4, t5, t6 = st.tabs([
+                        "Skills",
+                        "Projects",
+                        "Courses & Certs",
+                        "Structure",
+                        "ATS Checklist",
+                        "Action Plan"
+                    ])
+
+                    # Precompute shared data - use updated info if available
+                    if f'edited_info_{idx}' in st.session_state and st.session_state.get(f'score_updated_{idx}', False):
+                        analysis_info = st.session_state[f'edited_info_{idx}']
+                        analysis_field = detect_field(" ".join(analysis_info['skills']))
+                    else:
+                        analysis_info = info
+                        analysis_field = field
+                    
+                    current_skills = [s.lower() for s in analysis_info['skills'] if s != 'Not found']
+                    field_skills = SKILL_KEYWORDS.get(analysis_field, [])
+                
+                    with t1:
+                        st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                        st.subheader("🛠️ Skills Analysis & Recommendations")
+                        if current_skills:
+                            st.markdown("**✅ Skills You Have:** " + ", ".join(s.title() for s in current_skills[:5]))
+                        missing_skills = [skill for skill in field_skills if skill.lower() not in current_skills]
+                        if missing_skills:
+                            st.markdown("**❌ Critical Missing Skills:** " + ", ".join(s.title() for s in missing_skills[:5]))
+                        st.markdown("**📈 Skills Enhancement Strategy:**")
+                        st.markdown("• 🎯 Prioritize field-specific skills  • 📚 Learn complementary skills  • 🔄 Stay current  • 📊 Quantify proficiency")
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    with t2:
+                        st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                        st.subheader("💼 Project Recommendations")
+                        field_projects = PROJECT_IDEAS.get(field, [])
+                    if field_projects:
+                        for i, project in enumerate(field_projects[:3], 1):
+                            st.markdown(f"**{i}. {project}** — <span class='pill'>Tech: {', '.join(field_skills[:3])}</span>", unsafe_allow_html=True)
+                    st.markdown("**🚀 Tips:** Document, Demo, Metrics, Deploy, Responsive")
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                with t3:
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.subheader("📚 Course & Certification Recommendations")
+                    field_courses = COURSES.get(field, [])
+                    if field_courses:
+                        for i, course in enumerate(field_courses[:3], 1):
+                            provider = course.split(' – ')[-1] if ' – ' in course else 'Various'
+                            priority = 'High' if i == 1 else 'Medium' if i == 2 else 'Good to have'
+                            st.markdown(f"**{i}. {course}** — <span class='pill'>{provider}</span> <span class='pill'>{priority}</span>", unsafe_allow_html=True)
+                    field_certs = CERTIFICATIONS.get(field, [])
+                    if field_certs:
+                        st.markdown("**🏆 Certifications:** " + ", ".join(field_certs[:3]))
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                with t4:
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.subheader("📋 Resume Structure Enhancement")
+                    section_checklist = [
+                        ("Professional Summary", "summary" in text.lower() or "objective" in text.lower()),
+                        ("Contact Information", analysis_info['email'] != 'Not found' and analysis_info['phone'] != 'Not found'),
+                        ("Skills Section", len(current_skills) > 0),
+                        ("Experience Section", "experience" in text.lower()),
+                        ("Education Section", "education" in text.lower()),
+                        ("Projects Section", "projects" in text.lower()),
+                        ("Certifications Section", "certifications" in text.lower()),
+                        ("LinkedIn Profile", analysis_info['linkedin'] != 'Not found')
+                    ]
+                    pills = " ".join([f"<span class='pill {'good' if present else 'warn'}'>{section}</span>" for section, present in section_checklist])
+                    st.markdown(pills, unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                with t5:
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.subheader("🔍 ATS Optimization Checklist")
+                    ats_checklist = [
+                        ("Standard Section Headers", any(h in text.lower() for h in ["experience", "education", "skills"])),
+                        ("Keyword Optimization", len([kw for kw in field_skills if kw.lower() in text.lower()]) >= 3),
+                        ("Bullet Point Formatting", "•" in text or "- " in text),
+                        ("Clean Formatting", not any(char in text for char in ["[", "]", "{", "}", "|"])),
+                        ("Optimal Length", 500 <= len(text) <= 3000),
+                        ("Contact Information", analysis_info['email'] != 'Not found' and analysis_info['phone'] != 'Not found'),
+                        ("Recent Experience", any(year in text for year in ["2024", "2023", "2022"])),
+                        ("Quantifiable Results", any(word in text for word in ["%", "improved", "increased", "reduced"]))
+                    ]
+                    pills = " ".join([f"<span class='pill {'good' if present else 'warn'}'>{item}</span>" for item, present in ats_checklist])
+                    st.markdown(pills, unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                with t6:
+                    st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                    st.subheader("🎯 30-Day Action Plan")
+                    action_plan = [
+                        "Week 1: Complete 1-2 recommended courses",
+                        "Week 2: Start building a recommended project",
+                        "Week 3: Update resume with new skills and projects",
+                        "Week 4: Optimize for ATS and get feedback"
+                    ]
+                    st.markdown(" ".join([f"<span class='pill'>{step}</span>" for step in action_plan]), unsafe_allow_html=True)
+                    st.markdown("**Pro Tips:** Focus on quality, track progress, network, measure improvements, iterate.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                # End of Comprehensive Resume Enhancement Guide section
+
+            # --- Resume Improvement & Template Generator ---
+            # This section has been moved to the "Resume Generator" page
+
+            # --- Resume Generator Page Content ---
+            if page == "Resume Generator":
+                # --- Resume Improvement & Template Generator ---
+                st.markdown("<div class='hero'>", unsafe_allow_html=True)
+                st.markdown("<div class='title'>📝 Resume Generator</div>", unsafe_allow_html=True)
+                st.markdown("<div class='subtitle'>Create an enhanced, ATS-optimized resume with AI-powered suggestions</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
-                st.markdown("<span class='st-emoji'>👍</span> <b>Strengths:</b>", unsafe_allow_html=True)
-                st.image(ICON_SUGGEST, width=28)
-                strengths = []
-                if 'contact' in text.lower(): strengths.append("Clean layout, contact info present")
-                if any(s in [sk.lower() for sk in info['skills']] for s in ["python", "ml", "machine learning"]): strengths.append("Technical terms like 'Python', 'ML' appear")
-                if 'projects' in text.lower(): strengths.append("Projects section included")
-                for s in strengths:
-                    st.markdown(f"• {s}")
-                st.markdown("<span class='st-emoji'>👎</span> <b>Areas for Improvement:</b>", unsafe_allow_html=True)
-                st.markdown("• Did You Know? Adding actionable metrics (e.g. 'Improved X by 20%') increases readability")
-                st.markdown("• Tip: Add a 'Projects' section with 2–3 real-world examples")
-                if info['linkedin'] == 'Not found':
-                    st.markdown("• Tip: Add your LinkedIn URL")
+                st.image(ICON_FEEDBACK, width=32)
+                
+                # === 1. SUMMARY OF CHANGES NEEDED ===
+                st.markdown("### 📋 **Summary of Changes Needed**")
+                
+                # Collect all improvement suggestions
+                improvement_suggestions = []
+                
+                # Skills improvements
+                current_skills = [s.lower() for s in info['skills'] if s != 'Not found']
+                field_skills = SKILL_KEYWORDS.get(field, [])
+                missing_skills = [skill for skill in field_skills if skill.lower() not in current_skills]
+                if missing_skills:
+                    improvement_suggestions.append(f"**Add {len(missing_skills)} missing skills:** {', '.join(missing_skills[:3])}")
+                
+                # Section improvements
+                if 'summary' not in text.lower() and 'objective' not in text.lower():
+                    improvement_suggestions.append("**Add Professional Summary section**")
+                if 'projects' not in text.lower():
+                    improvement_suggestions.append("**Add Projects section**")
                 if 'certifications' not in text.lower():
-                    st.markdown("• Tip: Include a 'Certifications' section")
+                    improvement_suggestions.append("**Add Certifications section**")
+                if info['linkedin'] == 'Not found':
+                    improvement_suggestions.append("**Add LinkedIn profile URL**")
+                
+                # Formatting improvements
+                if "•" not in text and "- " not in text:
+                    improvement_suggestions.append("**Use bullet points for better formatting**")
+                if not any(word in text for word in ["%", "improved", "increased", "reduced"]):
+                    improvement_suggestions.append("**Add quantifiable achievements with metrics**")
+                
+                # Display improvements
+                if improvement_suggestions:
+                    st.markdown("**🔧 Required Improvements:**")
+                    for i, suggestion in enumerate(improvement_suggestions, 1):
+                        st.markdown(f"{i}. {suggestion}")
+                else:
+                    st.success("🎉 **Great job!** Your resume meets most professional standards.")
+                
+                st.markdown("---")
+                
+                # === 2. EDITABLE RESUME DETAILS ===
+                st.markdown("### ✏️ **Edit Resume Details**")
+                st.markdown("**Update your information for the improved resume:**")
+                
+                # Create editable fields
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    edited_name = st.text_input("Full Name", value=info['name'] if info['name'] != 'Not found' else "", key=f"improve_name_{idx}")
+                    edited_email = st.text_input("Email", value=info['email'] if info['email'] != 'Not found' else "", key=f"improve_email_{idx}")
+                    edited_phone = st.text_input("Phone", value=info['phone'] if info['phone'] != 'Not found' else "", key=f"improve_phone_{idx}")
+                    edited_linkedin = st.text_input("LinkedIn URL", value=info['linkedin'] if info['linkedin'] != 'Not found' else "", key=f"improve_linkedin_{idx}")
+                
+                with col2:
+                    edited_education = st.text_area("Education", value="\n".join(info['education']) if info['education'] and info['education'][0] != 'Not found' else "", key=f"improve_education_{idx}")
+                    edited_skills = st.text_area("Skills (one per line)", value="\n".join(info['skills']) if info['skills'] and info['skills'][0] != 'Not found' else "", key=f"improve_skills_{idx}")
+                    edited_certifications = st.text_area("Certifications", value="\n".join(info['certifications']) if info['certifications'] and info['certifications'][0] != 'Not found' else "", key=f"improve_certifications_{idx}")
+                
+                # Job-focused tailoring
+                st.markdown("**Job Target (optional):**")
+                target_role = st.text_input("Target Role / Title", value="", key=f"target_role_{idx}")
+                job_description = st.text_area("Paste Job Description (JD)", value="", height=150, key=f"job_desc_{idx}")
+                
+                # Simple keyword extraction from JD
+                def extract_keywords(text_block):
+                    words = re.findall(r"[A-Za-z]{3,}", text_block.lower())
+                    stop = set(["and","with","for","you","your","the","this","that","from","will","have","are","our","not","but","per","who","job","role","work","team","ability","skills","experience","years","strong","good","excellent","required","preferred","plus","using","use"])    
+                    freq = {}
+                    for w in words:
+                        if w in stop:
+                            continue
+                        freq[w] = freq.get(w, 0) + 1
+                    return [w for w,_ in sorted(freq.items(), key=lambda x: x[1], reverse=True)[:12]]
+                jd_keywords = extract_keywords(job_description) if job_description else []
+                # Tailored skills: prioritize overlap between JD keywords and provided skills/field skills
+                provided_skills = [s.strip().lower() for s in (edited_skills.split("\n") if edited_skills else []) if s.strip()]
+                tailored_priority = [kw for kw in jd_keywords if kw in provided_skills or kw in [fs.lower() for fs in SKILL_KEYWORDS.get(field, [])]]
+                
+                # Professional Summary
+                st.markdown("**Professional Summary:**")
+                professional_summary = st.text_area(
+                    "Write a compelling 2-3 sentence professional summary",
+                    value="",
+                    placeholder="e.g., Experienced [field] professional with expertise in [key skills]. Passionate about [relevant interests] and committed to delivering innovative solutions.",
+                    key=f"improve_summary_{idx}"
+                )
+                
+                # Experience Section
+                st.markdown("**Work Experience:**")
+                experience_text = st.text_area(
+                    "Add your work experience with bullet points",
+                    value="",
+                    placeholder="e.g., • Developed and maintained web applications using React and Node.js\n• Improved application performance by 25% through optimization\n• Collaborated with cross-functional teams to deliver projects on time",
+                    key=f"improve_experience_{idx}"
+                )
+                
+                # Projects Section
+                st.markdown("**Projects:**")
+                projects_text = st.text_area(
+                    "Add 2-3 relevant projects with technologies used",
+                    value="",
+                    placeholder="e.g., • E-commerce Platform - Built using React, Node.js, MongoDB\n• Machine Learning Model - Developed predictive analytics using Python, scikit-learn\n• Portfolio Website - Created responsive design with HTML, CSS, JavaScript",
+                    key=f"improve_projects_{idx}"
+                )
+                
+                st.markdown("---")
+                
+                # === 3. ATS-OPTIMIZED RESUME TEMPLATE ===
+                st.markdown("### 📄 **ATS-Optimized Resume Template**")
+                
+                # Generate improved resume content
+                if st.button("🔄 Generate Improved Resume", key=f"improve_generate_{idx}"):
+                    # Create ATS-optimized professional resume content
+                    # Precompute default sections to avoid backslashes in f-string expressions
+                    default_summary = (
+                        professional_summary
+                        if professional_summary
+                        else (
+                            f"Results-driven {field} professional with {len(field_skills[:3])}+ years of experience in {', '.join(field_skills[:3])}. "
+                            f"Proven track record of delivering innovative solutions and driving measurable business outcomes. "
+                            f"Passionate about continuous learning and staying current with industry trends."
+                        )
+                    )
+
+                    default_skills = (
+                        (', '.join([s.title() for s in tailored_priority[:8]]))
+                        if tailored_priority
+                        else (edited_skills if edited_skills else ', '.join(field_skills[:8]))
+                    )
+
+                    default_experience = (
+                        experience_text
+                        if experience_text
+                        else (
+                            f"• Developed and implemented {field.lower()} solutions resulting in 25% improvement in efficiency\n"
+                            f"• Collaborated with cross-functional teams to deliver projects on time and within budget\n"
+                            f"• Utilized {', '.join(field_skills[:3])} to optimize processes and enhance user experience\n"
+                            f"• Analyzed data and provided actionable insights leading to informed decision-making"
+                        )
+                    )
+
+                    default_education = (
+                        edited_education
+                        if edited_education
+                        else (
+                            "• Bachelor's Degree in Computer Science/Related Field\n"
+                            "• Relevant coursework: Data Structures, Algorithms, Database Management\n"
+                            "• GPA: 3.5+ (if applicable)"
+                        )
+                    )
+
+                    default_projects = (
+                        projects_text
+                        if projects_text
+                        else (
+                            f"• {field} Application - Built using {', '.join(field_skills[:3])}, deployed on cloud platform\n"
+                            "• Data Analysis Project - Developed predictive models achieving 85% accuracy\n"
+                            "• Portfolio Website - Responsive design with modern UI/UX principles"
+                        )
+                    )
+
+                    default_certifications = (
+                        edited_certifications
+                        if edited_certifications
+                        else (
+                            f"• {field} Certification - Industry-recognized credential\n"
+                            "• Professional Development Courses - Continuous learning initiatives\n"
+                            "• Technical Training - Hands-on workshops and bootcamps"
+                        )
+                    )
+
+                    improved_resume = f"""
+{edited_name.upper()}
+{edited_email} | {edited_phone} | {edited_linkedin}
+
+TARGET ROLE
+{target_role if target_role else field}
+
+PROFESSIONAL SUMMARY
+{default_summary}
+
+TECHNICAL SKILLS
+{default_skills}
+
+PROFESSIONAL EXPERIENCE
+{default_experience}
+
+EDUCATION
+{default_education}
+
+PROJECTS
+{default_projects}
+
+CERTIFICATIONS & TRAINING
+{default_certifications}
+
+ADDITIONAL INFORMATION
+• Proficient in Agile methodologies and project management tools
+• Strong problem-solving skills with analytical mindset
+• Excellent communication and collaboration abilities
+• Committed to continuous professional development
+"""
+                    
+                    # Store the improved resume in session state
+                    st.session_state[f'improved_resume_{idx}'] = improved_resume
+                    
+                    st.success("✅ **Improved Resume Generated!** Scroll down to preview and download.")
+                
+                # === 4. RESUME PREVIEW ===
+                if f'improved_resume_{idx}' in st.session_state:
+                    st.markdown("### 👀 **Resume Preview**")
+                    
+                    # Display the improved resume
+                    st.text_area(
+                        "Preview of Your Improved Resume",
+                        value=st.session_state[f'improved_resume_{idx}'],
+                        height=400,
+                        key=f"improve_preview_{idx}"
+                    )
+                    
+                    # === 5. DOWNLOAD OPTIONS ===
+                    st.markdown("### 💾 **Download Options**")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        # Download as TXT
+                        st.download_button(
+                            label="📄 Download as Text",
+                            data=st.session_state[f'improved_resume_{idx}'],
+                            file_name=f"{edited_name.replace(' ', '_')}_Improved_Resume.txt",
+                            mime="text/plain",
+                            key=f"improve_download_txt_{idx}"
+                        )
+                    
+                    with col2:
+                        # Download as HTML (formatted, academic single-column)
+                        # Precompute HTML sections to avoid backslashes in f-string expressions
+                        html_target_role = f'<div class="muted">Target Role: {target_role}</div>' if target_role else ''
+                        
+                        html_summary = (
+                            professional_summary
+                            if professional_summary
+                            else f'Experienced {field} professional with expertise in {", ".join(field_skills[:3])}. Passionate about technology and committed to delivering innovative solutions.'
+                        )
+                        
+                        html_skills_chips = (
+                            ''.join([f'<span>{s.title()}</span>' for s in tailored_priority[:10]])
+                            if tailored_priority
+                            else (edited_skills if edited_skills else ', '.join(field_skills[:8]))
+                        )
+                        
+                        html_experience = (
+                            experience_text.replace(chr(10), '<br>')
+                            if experience_text
+                            else f'• Developed and implemented {field.lower()} solutions resulting in 25% improvement in efficiency<br>• Collaborated with cross-functional teams to deliver projects on time and within budget<br>• Utilized {", ".join(field_skills[:3])} to optimize processes and enhance user experience'
+                        )
+                        
+                        html_education = (
+                            edited_education.replace(chr(10), '<br>')
+                            if edited_education
+                            else '• Bachelor\'s Degree in Computer Science/Related Field<br>• Relevant coursework: Data Structures, Algorithms, Database Management'
+                        )
+                        
+                        html_projects = (
+                            projects_text.replace(chr(10), '<br>')
+                            if projects_text
+                            else f'• {field} Application - Built using {", ".join(field_skills[:3])}, deployed on cloud platform<br>• Data Analysis Project - Developed predictive models achieving 85% accuracy'
+                        )
+                        
+                        html_certifications = (
+                            edited_certifications.replace(chr(10), '<br>')
+                            if edited_certifications
+                            else f'• {field} Certification - Industry-recognized credential<br>• Professional Development Courses - Continuous learning initiatives'
+                        )
+                        
+                        html_resume = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{edited_name} - Resume</title>
+    <style>
+        body {{ margin: 36px; line-height: 1.55; color:#213047; font-family: 'Segoe UI', Arial, sans-serif; }}
+        h1 {{ font-family: Georgia, 'Times New Roman', serif; font-weight: 800; color: #0c2d57; margin: 0 0 6px 0; }}
+        .accent {{ height: 4px; width: 72px; background: linear-gradient(90deg,#0f67ff,#5aa1ff); border-radius: 999px; margin-bottom: 18px; }}
+        h2 {{ font-family: Georgia, 'Times New Roman', serif; color: #0c2d57; margin-top: 22px; margin-bottom: 8px; font-size: 18px; }}
+        .contact {{ margin-bottom: 14px; color:#37506b; }}
+        .section {{ margin-bottom: 16px; }}
+        .chips span {{ display:inline-block; background:#eef3ff; color:#0f67ff; padding:4px 8px; border-radius:999px; margin:2px; font-size:12px; }}
+        .muted {{ color:#5c708a; }}
+    </style>
+</head>
+<body>
+    <h1>{edited_name}</h1>
+    <div class="accent"></div>
+    <div class="contact">{edited_email} | {edited_phone} | {edited_linkedin}</div>
+    {html_target_role}
+    
+    <div class="section">
+        <h2>Professional Summary</h2>
+        <p>{html_summary}</p>
+    </div>
+    
+    <div class="section">
+        <h2>Technical Skills</h2>
+        <div class="chips">{html_skills_chips}</div>
+    </div>
+    
+    <div class="section">
+        <h2>Experience</h2>
+        <p>{html_experience}</p>
+    </div>
+    
+    <div class="section">
+        <h2>Education</h2>
+        <p>{html_education}</p>
+    </div>
+    
+    <div class="section">
+        <h2>Projects / Coursework</h2>
+        <p>{html_projects}</p>
+    </div>
+    
+    <div class="section">
+        <h2>Certifications & Training</h2>
+        <p>{html_certifications}</p>
+    </div>
+</body>
+</html>
+"""
+                        
+                        st.download_button(
+                            label="🌐 Download as HTML",
+                            data=html_resume,
+                            file_name=f"{edited_name.replace(' ', '_')}_Improved_Resume.html",
+                            mime="text/html",
+                            key=f"improve_download_html_{idx}"
+                        )
+                    
+                    with col3:
+                        # Generate and download PDF
+                        if st.button("📋 Generate PDF Resume", key=f"generate_pdf_{idx}"):
+                            # Prepare content for PDF
+                            pdf_summary = professional_summary if professional_summary else f"Results-driven {field} professional with {len(field_skills[:3])}+ years of experience in {', '.join(field_skills[:3])}. Proven track record of delivering innovative solutions and driving measurable business outcomes."
+                            
+                            pdf_skills = edited_skills if edited_skills else ', '.join(field_skills[:8])
+                            
+                            pdf_experience = experience_text if experience_text else f"• Developed and implemented {field.lower()} solutions resulting in 25% improvement in efficiency\n• Collaborated with cross-functional teams to deliver projects on time and within budget\n• Utilized {', '.join(field_skills[:3])} to optimize processes and enhance user experience"
+                            
+                            pdf_education = edited_education if edited_education else "• Bachelor's Degree in Computer Science/Related Field\n• Relevant coursework: Data Structures, Algorithms, Database Management"
+                            
+                            pdf_projects = projects_text if projects_text else f"• {field} Application - Built using {', '.join(field_skills[:3])}, deployed on cloud platform\n• Data Analysis Project - Developed predictive models achieving 85% accuracy"
+                            
+                            pdf_certifications = edited_certifications if edited_certifications else f"• {field} Certification - Industry-recognized credential\n• Professional Development Courses - Continuous learning initiatives"
+                            
+                            # Generate PDF
+                            pdf_content = generate_pdf_resume(
+                                edited_name, edited_email, edited_phone, edited_linkedin,
+                                pdf_summary, pdf_skills, pdf_experience, pdf_education,
+                                pdf_projects, pdf_certifications, field
+                            )
+                            
+                            # Store PDF in session state only if valid bytes were returned
+                            if pdf_content:
+                                st.session_state[f'pdf_resume_{idx}'] = pdf_content
+                                st.success("✅ PDF generated successfully! Click download below.")
+                            else:
+                                st.warning("PDF generation failed or is unavailable. Please ensure 'reportlab' is installed.")
+                        
+                        # Download PDF if available
+                        if f'pdf_resume_{idx}' in st.session_state and st.session_state[f'pdf_resume_{idx}']:
+                            st.download_button(
+                                label="📄 Download PDF",
+                                data=st.session_state[f'pdf_resume_{idx}'],
+                                file_name=f"{edited_name.replace(' ', '_')}_Professional_Resume.pdf",
+                                mime="application/pdf",
+                                key=f"improve_download_pdf_{idx}"
+                            )
+                    
+                    # ATS Score for improved resume
+                    st.markdown("### 🎯 **Improved Resume ATS Score**")
+                    
+                    # Calculate ATS score for improved resume
+                    improved_info = {
+                        'name': edited_name,
+                        'email': edited_email,
+                        'phone': edited_phone,
+                        'linkedin': edited_linkedin,
+                        'education': edited_education.split('\n') if edited_education else [],
+                        'skills': edited_skills.split('\n') if edited_skills else [],
+                        'certifications': edited_certifications.split('\n') if edited_certifications else []
+                    }
+                    
+                    improved_score, improved_breakdown = dynamic_resume_score(st.session_state[f'improved_resume_{idx}'], improved_info, field)
+                    
+                    st.metric("Improved ATS Score", f"{improved_score}/100")
+                    st.progress(improved_score / 100)
+                    
+                    if improved_score >= 85:
+                        st.success("🎉 **Excellent!** Your improved resume should pass most ATS systems.")
+                    elif improved_score >= 75:
+                        st.info("✅ **Great improvement!** Your resume is now ATS-optimized.")
+                    else:
+                        st.warning("⚠️ **Good progress!** Continue refining for better results.")
+                
                 st.markdown("</div>", unsafe_allow_html=True)
 
-            # --- Missing Skills & Recommended Courses Block ---
-            with st.expander("✅ Missing Skills & Recommended Courses", expanded=False):
+            # --- Job Matching Page Content ---
+            if page == "Job Matching":
+                st.markdown("<div class='hero'>", unsafe_allow_html=True)
+                st.markdown("<div class='title'>🎯 Job Matching</div>", unsafe_allow_html=True)
+                st.markdown("<div class='subtitle'>Find companies hiring for roles that match your resume</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
-                st.image(ICON_SKILLS, width=32)
-                shown = 0
-                for skill in IDEAL_SKILLS:
-                    if shown >= skill_count:
-                        break
-                    if skill in [sk.lower() for sk in info['skills']]:
-                        st.markdown(f"• {skill}")
+                
+                # Check if user has uploaded a resume
+                if files:
+                    # Analyze the first resume to determine the role
+                    if len(files) > 0:
+                        # Use the first uploaded file
+                        uploaded = files[0]
+                        if isinstance(uploaded, dict):
+                            file_extension = uploaded.get('ext', 'pdf')
+                            data_bytes = uploaded.get('bytes', b"")
+                        else:
+                            file_extension = uploaded.name.split('.')[-1].lower()
+                            try:
+                                data_bytes = uploaded.read()
+                            except Exception:
+                                data_bytes = b""
+                        
+                        temp_file_path = f"temp_resume_job_matching.{file_extension}"
+                        with open(temp_file_path, "wb") as f:
+                            f.write(data_bytes)
+                        
+                        # Extract text and analyze
+                        if file_extension == "pdf":
+                            text = extract_text_from_pdf(temp_file_path)
+                        elif file_extension == "docx":
+                            text = extract_text_from_docx(temp_file_path)
+                        else:
+                            text = ""
+                        
+                        # Analyze resume to determine role
+                        info = extract_info(text)
+                        field = detect_field(text)
+                        
+                        st.markdown("### 📋 **Your Resume Analysis**")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write(f"**Name:** {info['name']}")
+                            st.write(f"**Email:** {info['email']}")
+                            st.write(f"**Phone:** {info['phone']}")
+                        
+                        with col2:
+                            st.write(f"**Detected Field:** {field}")
+                            st.write(f"**Skills Found:** {len([s for s in info['skills'] if s != 'Not found'])} skills")
+                            st.write(f"**Experience Level:** {'Senior' if len(text) > 2000 else 'Mid-level' if len(text) > 1000 else 'Entry-level'}")
+                        
+                        # Job matching based on detected field
+                        st.markdown("### 🎯 **Matching Job Opportunities**")
+                        
+                        # Define job opportunities by field
+                        job_opportunities = {
+                            "Data Science": [
+                                {"company": "Google", "role": "Data Scientist", "location": "Mountain View, CA", "salary": "$130k-180k", "match": "95%", "skills": ["Python", "Machine Learning", "SQL"]},
+                                {"company": "Microsoft", "role": "Senior Data Analyst", "location": "Seattle, WA", "salary": "$120k-160k", "match": "92%", "skills": ["Python", "PowerBI", "Statistics"]},
+                                {"company": "Amazon", "role": "Data Engineer", "location": "Austin, TX", "salary": "$125k-170k", "match": "88%", "skills": ["Python", "AWS", "Spark"]},
+                                {"company": "Meta", "role": "Research Scientist", "location": "Menlo Park, CA", "salary": "$140k-200k", "match": "90%", "skills": ["Python", "Deep Learning", "Research"]},
+                                {"company": "Netflix", "role": "Data Scientist", "location": "Los Gatos, CA", "salary": "$135k-185k", "match": "87%", "skills": ["Python", "A/B Testing", "Statistics"]}
+                            ],
+                            "Web Development": [
+                                {"company": "Google", "role": "Frontend Engineer", "location": "Mountain View, CA", "salary": "$120k-170k", "match": "93%", "skills": ["React", "JavaScript", "CSS"]},
+                                {"company": "Facebook", "role": "Full Stack Developer", "location": "Menlo Park, CA", "salary": "$125k-175k", "match": "91%", "skills": ["React", "Node.js", "GraphQL"]},
+                                {"company": "Airbnb", "role": "Software Engineer", "location": "San Francisco, CA", "salary": "$130k-180k", "match": "89%", "skills": ["React", "Python", "Django"]},
+                                {"company": "Uber", "role": "Frontend Engineer", "location": "San Francisco, CA", "salary": "$115k-165k", "match": "86%", "skills": ["React", "TypeScript", "Webpack"]},
+                                {"company": "Stripe", "role": "Full Stack Engineer", "location": "San Francisco, CA", "salary": "$140k-190k", "match": "94%", "skills": ["React", "Ruby", "PostgreSQL"]}
+                            ],
+                            "Artificial Intelligence": [
+                                {"company": "OpenAI", "role": "AI Research Engineer", "location": "San Francisco, CA", "salary": "$150k-220k", "match": "96%", "skills": ["Python", "TensorFlow", "NLP"]},
+                                {"company": "Tesla", "role": "Machine Learning Engineer", "location": "Palo Alto, CA", "salary": "$140k-200k", "match": "92%", "skills": ["Python", "PyTorch", "Computer Vision"]},
+                                {"company": "NVIDIA", "role": "AI Software Engineer", "location": "Santa Clara, CA", "salary": "$135k-185k", "match": "89%", "skills": ["Python", "CUDA", "Deep Learning"]},
+                                {"company": "DeepMind", "role": "Research Scientist", "location": "London, UK", "salary": "$130k-180k", "match": "95%", "skills": ["Python", "Reinforcement Learning", "Research"]},
+                                {"company": "Anthropic", "role": "AI Safety Researcher", "location": "San Francisco, CA", "salary": "$145k-210k", "match": "91%", "skills": ["Python", "AI Safety", "Research"]}
+                            ],
+                            "Cybersecurity": [
+                                {"company": "CrowdStrike", "role": "Security Engineer", "location": "Austin, TX", "salary": "$120k-170k", "match": "94%", "skills": ["Python", "SIEM", "Threat Analysis"]},
+                                {"company": "Palo Alto Networks", "role": "Cybersecurity Analyst", "location": "Santa Clara, CA", "salary": "$115k-160k", "match": "91%", "skills": ["Network Security", "Firewalls", "Incident Response"]},
+                                {"company": "FireEye", "role": "Security Consultant", "location": "Milpitas, CA", "salary": "$125k-175k", "match": "88%", "skills": ["Penetration Testing", "Vulnerability Assessment", "Security"]},
+                                {"company": "Rapid7", "role": "Security Researcher", "location": "Boston, MA", "salary": "$130k-180k", "match": "92%", "skills": ["Python", "Malware Analysis", "Research"]},
+                                {"company": "Zscaler", "role": "Cloud Security Engineer", "location": "San Jose, CA", "salary": "$135k-185k", "match": "90%", "skills": ["Cloud Security", "AWS", "Zero Trust"]}
+                            ]
+                        }
+                        
+                        # Get opportunities for the detected field
+                        opportunities = job_opportunities.get(field, job_opportunities["Data Science"])  # Default to Data Science
+                        
+                        # Display job opportunities
+                        for i, job in enumerate(opportunities):
+                            with st.expander(f"🏢 {job['company']} - {job['role']} ({job['match']} Match)", expanded=(i==0)):
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    st.markdown(f"**📍 Location:** {job['location']}")
+                                    st.markdown(f"**💰 Salary:** {job['salary']}")
+                                
+                                with col2:
+                                    st.markdown(f"**🎯 Match Score:** {job['match']}")
+                                    st.markdown(f"**🏢 Company:** {job['company']}")
+                                
+                                with col3:
+                                    st.markdown("**🛠 Required Skills:**")
+                                    for skill in job['skills']:
+                                        # Check if user has this skill
+                                        user_skills = [s.lower() for s in info['skills'] if s != 'Not found']
+                                        if skill.lower() in user_skills:
+                                            st.markdown(f"✅ {skill}")
+                                        else:
+                                            st.markdown(f"❌ {skill}")
+                                
+                                # Application tips
+                                st.markdown("**💡 Application Tips:**")
+                                tips = [
+                                    f"Highlight your {field.lower()} experience in your cover letter",
+                                    f"Emphasize projects that demonstrate {', '.join(job['skills'][:2])} skills",
+                                    f"Research {job['company']}'s recent initiatives and mention them",
+                                    "Quantify your achievements with specific metrics",
+                                    "Tailor your resume to include keywords from the job description"
+                                ]
+                                
+                                for tip in tips:
+                                    st.write(f"• {tip}")
+                                
+                                # Apply button (placeholder)
+                                if st.button(f"📝 Apply at {job['company']}", key=f"apply_{job['company']}_{i}"):
+                                    st.info(f"💡 This would redirect to {job['company']}'s career page in a real application!")
+                        
+                        # Summary statistics
+                        st.markdown("### 📊 **Job Market Summary**")
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            st.metric("Total Opportunities", len(opportunities))
+                        with col2:
+                            avg_salary = sum([int(job['salary'].split('-')[0].replace('$', '').replace('k', '')) for job in opportunities]) // len(opportunities)
+                            st.metric("Avg. Salary", f"${avg_salary}k")
+                        with col3:
+                            high_match = len([j for j in opportunities if int(j['match'].replace('%', '')) >= 90])
+                            st.metric("High Match Jobs", high_match)
+                        with col4:
+                            st.metric("Your Skills Match", f"{len([s for s in info['skills'] if s != 'Not found'])} skills")
+                        
+                        # Download job opportunities
+                        job_summary = f"""
+JOB OPPORTUNITIES FOR: {info['name'].upper()}
+DETECTED FIELD: {field}
+
+OPPORTUNITIES FOUND: {len(opportunities)}
+
+"""
+                        for i, job in enumerate(opportunities, 1):
+                            job_summary += f"""
+{i}. {job['company']} - {job['role']}
+   Location: {job['location']}
+   Salary: {job['salary']}
+   Match Score: {job['match']}
+   Required Skills: {', '.join(job['skills'])}
+   
+"""
+                        
+                        st.download_button(
+                            label="📄 Download Job Opportunities",
+                            data=job_summary,
+                            file_name=f"{info['name'].replace(' ', '_')}_Job_Opportunities.txt",
+                            mime="text/plain",
+                            key="download_job_opportunities"
+                        )
+                
+                else:
+                    st.info("👆 Please upload your resume first to get personalized job recommendations!")
+                    st.markdown("""
+                    **🎯 What Job Matching Provides:**
+                    
+                    • **Role Detection** - Analyzes your resume to identify your target role
+                    • **Company Matching** - Finds companies actively hiring for your skills
+                    • **Salary Insights** - Shows market rates for your position
+                    • **Skill Gap Analysis** - Identifies missing skills for target roles
+                    • **Application Tips** - Personalized advice for each opportunity
+                    • **Match Scoring** - Shows how well you fit each position
+                    • **Location Options** - Remote and on-site opportunities
+                    """)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- Resume Length Checker (Outside tabs loop) ---
+    if page == "Edit & Build" and files:
+        st.markdown("### 📏 **Resume Length Analysis**")
+        
+        # Get the first resume's text for analysis
+        if len(files) > 0:
+            # Build temp file from cached bytes or live upload
+            if isinstance(files[0], dict):
+                file_extension = files[0].get('ext', 'pdf')
+                data_bytes = files[0].get('bytes', b"")
+            else:
+                file_extension = files[0].name.split('.')[-1].lower()
+                try:
+                    data_bytes = files[0].read()
+                except Exception:
+                    data_bytes = b""
+            temp_file_path = f"temp_resume_length_check.{file_extension}"
+            with open(temp_file_path, "wb") as f:
+                f.write(data_bytes)
+            
+            # Extract text based on file type
+            if file_extension == "pdf":
+                text = extract_text_from_pdf(temp_file_path)
+            elif file_extension == "docx":
+                text = extract_text_from_docx(temp_file_path)
+            else:
+                text = ""
+            
+            # Calculate resume length metrics
+            word_count = len(text.split())
+            char_count = len(text)
+            line_count = len(text.split('\n'))
+            
+            # Determine experience level based on content length
+            if word_count < 300:
+                experience_level = "Entry-level"
+                recommended_length = "300-500 words"
+                length_status = "Too Short"
+                length_color = "warning"
+            elif word_count < 500:
+                experience_level = "Entry to Mid-level"
+                recommended_length = "400-600 words"
+                length_status = "Good"
+                length_color = "success"
+            elif word_count < 800:
+                experience_level = "Mid-level"
+                recommended_length = "500-800 words"
+                length_status = "Optimal"
+                length_color = "success"
+            elif word_count < 1200:
+                experience_level = "Senior-level"
+                recommended_length = "700-1000 words"
+                length_status = "Good"
+                length_color = "success"
+            else:
+                experience_level = "Executive-level"
+                recommended_length = "800-1200 words"
+                length_status = "Too Long"
+                length_color = "warning"
+            
+            # Display length metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Word Count", word_count)
+            with col2:
+                st.metric("Character Count", f"{char_count:,}")
+            with col3:
+                st.metric("Lines", line_count)
+            with col4:
+                if length_color == "success":
+                    st.success(f"✅ {length_status}")
+                else:
+                    st.warning(f"⚠️ {length_status}")
+            
+            # Length recommendations
+            st.markdown("**📋 Length Recommendations:**")
+            st.write(f"• **Experience Level:** {experience_level}")
+            st.write(f"• **Recommended Length:** {recommended_length}")
+            st.write(f"• **Current Status:** {length_status}")
+            
+            # Specific recommendations based on length
+            if word_count < 300:
+                st.warning("**⚠️ Your resume is too short!** Consider adding:")
+                st.write("• More detailed job descriptions with achievements")
+                st.write("• Additional skills and certifications")
+                st.write("• Projects and volunteer experience")
+                st.write("• Quantifiable results and metrics")
+            elif word_count > 1200:
+                st.warning("**⚠️ Your resume is too long!** Consider:")
+                st.write("• Removing outdated or irrelevant experience")
+                st.write("• Condensing job descriptions to key achievements")
+                st.write("• Removing redundant skills")
+                st.write("• Focusing on most recent and relevant experience")
+            else:
+                st.success("**✅ Your resume length is optimal!**")
+                st.write("• Good balance of detail and conciseness")
+                st.write("• Appropriate for your experience level")
+                st.write("• ATS-friendly length")
+            
+            st.markdown("---")
+
