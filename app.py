@@ -3,6 +3,7 @@ import re
 import random
 import datetime
 import spacy
+<<<<<<< HEAD
 import fitz  # PyMuPDF for better PDF extraction (fitz is the module name for PyMuPDF)
 from difflib import SequenceMatcher
 import docx  # For .docx support
@@ -585,6 +586,26 @@ PRE_UPLOAD_GUIDELINES = """
 • Proofread for spelling and grammar errors
 """
 
+=======
+from pdfminer.high_level import extract_text
+
+nlp = spacy.load("en_core_web_sm")
+
+SKILL_KEYWORDS = {
+    "Data Science": ["python", "machine learning", "pandas", "numpy", "tensorflow", "data analysis"],
+    "Web Development": ["html", "css", "javascript", "react", "node", "flask", "django"],
+    "Android Development": ["android", "kotlin", "java", "xml"],
+    "UI/UX": ["figma", "adobe xd", "photoshop", "sketch"],
+}
+
+COURSES = {
+    "Data Science": ["Data Science with Python", "Machine Learning A-Z"],
+    "Web Development": ["React for Beginners", "Full Stack with Django"],
+    "Android Development": ["Android with Kotlin", "Build Apps with Firebase"],
+    "UI/UX": ["Figma UI Basics", "UX Design Crash Course"]
+}
+
+>>>>>>> 1a206628 (Initial commit)
 # --- Project Suggestions by Field ---
 PROJECT_IDEAS = {
     "Data Science": [
@@ -607,6 +628,7 @@ PROJECT_IDEAS = {
         "Mobile App Redesign (Figma)",
         "Landing Page UI (Adobe XD)",
         "User Flow Mapping"
+<<<<<<< HEAD
     ],
     "Artificial Intelligence": ["Fake News Detection using BERT", "Image Captioning with CNN+RNN", "Speech Recognition System (Deep Learning)", "Chatbot with Transformers"],
     "Cybersecurity": ["Network Vulnerability Scanner", "Phishing Detection System", "Firewall Rule Automation", "SIEM Log Analyzer"],
@@ -636,6 +658,9 @@ CERTIFICATIONS = {
     "HR": ["SHRM-CP", "HRCI PHR"],
     "Digital Marketing": ["Google Analytics Individual Qualification", "HubSpot Content Marketing"],
     "UI/UX": ["NN/g UX Certification", "Adobe Certified Expert"]
+=======
+    ]
+>>>>>>> 1a206628 (Initial commit)
 }
 
 TOOLS_LIST = ["VS Code", "Jupyter", "GitHub", "Excel", "Tableau"]
@@ -648,6 +673,7 @@ KNOWN_SKILLS = set([
 CERT_PROVIDERS = ["coursera", "udemy", "aws", "google", "microsoft", "edx", "udacity", "ibm", "oracle", "linkedin learning"]
 
 
+<<<<<<< HEAD
 # --- Detect Field ---
 def detect_field(text_or_skills):
     skill_set = set([s.lower() for s in text_or_skills.split()] if isinstance(text_or_skills, str) else [s.lower() for s in text_or_skills])
@@ -659,6 +685,68 @@ def detect_field(text_or_skills):
             max_matches = match_count
             best_field = field
     return best_field
+=======
+def extract_text_from_pdf(file):
+    return extract_text(file)
+
+
+
+def extract_info(text):
+    doc = nlp(text)
+    emails = re.findall(r"\S+@\S+", text)
+    phones = re.findall(r"\+?\d[\d\s]{8,}\d", text)
+    # 1. Try to extract name from 'Name:' or similar at the top
+    name_match = re.search(r"(?i)^(?:name\s*[:\-]?\s*)([A-Z][a-z]+(?: [A-Z][a-z]+)+)", text[:200])
+    if name_match:
+        name = name_match.group(1).strip()
+    else:
+        # 2. Fallback to spaCy NER, but ignore common skills/tech words
+        skill_words = set([kw.lower() for kws in SKILL_KEYWORDS.values() for kw in kws] + ["java", "python", "html", "css", "sql", "react", "node", "django", "flask"])
+        names = [ent.text for ent in doc.ents if ent.label_ == "PERSON" and ent.text.lower() not in skill_words and len(ent.text.split()) <= 3 and len(ent.text.split()) > 1]
+        name = names[0].strip() if names else "Not found"
+    # Education extraction (degree, institute, year)
+    edu_pattern = r"((Bachelor|Master|B\.Sc|M\.Sc|B\.Tech|M\.Tech|PhD|MBA)[^\n\r,;]*?(?:at|from)?\s*([A-Za-z .&'-]+)?\s*(\d{4})?)"
+    education = re.findall(edu_pattern, text, re.IGNORECASE)
+    education = [f"{deg.strip()} {inst.strip() if inst else ''} {yr.strip() if yr else ''}".strip() for _, deg, inst, yr in education]
+    # Skills extraction (from known list and NER)
+    all_skills = set()
+    for skill in KNOWN_SKILLS:
+        if re.search(rf"\\b{re.escape(skill)}\\b", text, re.IGNORECASE):
+            all_skills.add(skill)
+    # Add NER-based skills (ORG, PRODUCT, etc.)
+    for ent in doc.ents:
+        if ent.label_ in ["ORG", "PRODUCT"] and len(ent.text) < 30:
+            all_skills.add(ent.text.lower())
+        
+    # Certifications extraction (provider keywords)
+
+    certs = []
+    for prov in CERT_PROVIDERS:
+        certs += re.findall(rf"([\w .-]+(?:{prov})[\w .-]*)", text, re.IGNORECASE)
+    certs = list(set(certs))
+    # URL extraction
+    linkedin = re.findall(r"https?://(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_/]+", text)
+    github = re.findall(r"https?://(www\.)?github\.com/[a-zA-Z0-9\-_/]+", text)
+    portfolio = re.findall(r"https?://[\w\.-]+\.(me|dev|xyz|site|portfolio|io|com)/[a-zA-Z0-9\-_/]*", text)
+    return {
+        "name": name,
+        "email": emails[0] if emails else "Not found",
+        "phone": phones[0] if phones else "Not found",
+        "education": education if education else ["Not found"],
+        "skills": list(all_skills) if all_skills else ["Not found"],
+        "certifications": certs if certs else ["Not found"],
+        "linkedin": linkedin[0] if linkedin else "Not found",
+        "github": github[0] if github else "Not found",
+        "portfolio": portfolio[0][0] if portfolio else "Not found"
+    }
+
+
+def detect_field(skills):
+    for field, keywords in SKILL_KEYWORDS.items():
+        if any(skill in skills.lower() for skill in keywords):
+            return field
+    return "General"
+>>>>>>> 1a206628 (Initial commit)
 
 
 # --- Ideal Resume Template ---
@@ -690,6 +778,7 @@ def clarity_score(text):
         metrics += 1
     return int((metrics / 3) * 15)  # up to 15 points for clarity
 
+<<<<<<< HEAD
 # --- Professional Resume Scoring System (Enhancv-inspired) ---
 def dynamic_resume_score(text, info, field="General"):
     """
@@ -1057,11 +1146,17 @@ def get_personalized_tips(text, info):
     # Limit to most important tips
     return tips[:6]
 
+=======
+>>>>>>> 1a206628 (Initial commit)
 # --- YouTube Video Recommendation ---
 YOUTUBE_VIDEO = {
     "title": "How to Make a Resume Stand Out in 2024 (5 Tips)",
     "summary": "A concise guide to making your resume stand out with actionable tips and real examples.",
+<<<<<<< HEAD
     "url": "https://youtu.be/IIGWpw1FXhk?si=eaG2uk0OCHGvm7Tw"
+=======
+    "url": "https://www.youtube.com/watch?v=Qb1b1s4A4gI"
+>>>>>>> 1a206628 (Initial commit)
 }
 
 # --- Relevant/Irrelevant Courses/Certs ---
@@ -1129,6 +1224,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+<<<<<<< HEAD
     .stAlert-success {
         color: #222 !important;
     }
@@ -1190,6 +1286,15 @@ st.markdown(
         background: linear-gradient(120deg, #e0e7ff 0%, #c9e4ff 100%) !important;
         border-right: 2px solid #bfc9d9;
     }
+=======
+    .main {background-color: #f8f9fa;}
+    .stProgress > div > div > div > div {
+        background-image: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
+    }
+    .st-bb {border-bottom: 2px solid #e0e0e0; margin: 1.5em 0 1em 0;}
+    .st-section {padding: 1em 1.5em; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px #e0e0e0; margin-bottom: 1.5em;}
+    .st-emoji {font-size: 1.3em; margin-right: 0.3em;}
+>>>>>>> 1a206628 (Initial commit)
     </style>
     """,
     unsafe_allow_html=True
@@ -1204,6 +1309,7 @@ ICON_VIDEO = "https://cdn-icons-png.flaticon.com/512/1384/1384060.png"
 ICON_SUGGEST = "https://cdn-icons-png.flaticon.com/512/1828/1828884.png"
 ICON_FEEDBACK = "https://cdn-icons-png.flaticon.com/512/1828/1828919.png"
 
+<<<<<<< HEAD
 # --- User Greeting and Title ---
 st.markdown("""
 <div style='margin-bottom: 1.5em;'>
@@ -1318,11 +1424,52 @@ if uploaded_files:
                     info = edited_info
                     field = detect_field(" ".join(edited_info['skills']))
                 
+=======
+# --- UI: Multiple Resume Uploads ---
+st.title("🧑‍💼 Resume Analyzer")
+st.markdown("<div class='st-bb'></div>", unsafe_allow_html=True)
+st.markdown("<h4>Upload your resume(s) and get instant, actionable feedback! 🚀</h4>", unsafe_allow_html=True)
+
+uploaded_files = st.file_uploader("📤 Upload Resume(s) (PDF)", type=["pdf"], accept_multiple_files=True)
+st.markdown("<div class='st-bb'></div>", unsafe_allow_html=True)
+job_desc = st.text_area("📝 Paste Job Description Here (optional)", "", height=150)
+st.markdown("<div class='st-bb'></div>", unsafe_allow_html=True)
+
+if uploaded_files:
+    cols = st.columns(len(uploaded_files))
+    for idx, uploaded in enumerate(uploaded_files):
+        with cols[idx]:
+            st.markdown(f"<div class='st-section'>", unsafe_allow_html=True)
+            st.image(ICON_RESUME, width=48)
+            st.markdown(f"### 📄 <span class='st-emoji'>Resume {idx+1}</span>", unsafe_allow_html=True)
+            with open(f"temp_resume_{idx}.pdf", "wb") as f:
+                f.write(uploaded.read())
+            text = extract_text_from_pdf(f"temp_resume_{idx}.pdf")
+            info = extract_info(text)
+            field = detect_field(text)
+
+            # --- Extracted Info Block ---
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("🔍 Extracted Info")
+                st.image(ICON_FEEDBACK, width=32)
+                st.write(f"👤 **Name:** {info['name']}")
+                st.write(f"✉️ **Email:** {info['email']}")
+                st.write(f"📞 **Phone:** {info['phone']}")
+                st.write(f"🎓 **Education:** {', '.join(info['education'])}")
+                st.write(f"🛠️ **Skills:** {', '.join(info['skills'])}")
+                st.write(f"📄 **Certifications:** {', '.join(info['certifications'])}")
+                st.write(f"🔗 **LinkedIn:** {info['linkedin']}")
+                st.write(f"🐙 **GitHub:** {info['github']}")
+                st.write(f"🌐 **Portfolio:** {info['portfolio']}")
+                st.write(f"💼 **Predicted Field:** {field}")
+>>>>>>> 1a206628 (Initial commit)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # --- Resume Score Block ---
             with st.container():
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+<<<<<<< HEAD
                 resume_score, score_breakdown = dynamic_resume_score(text, info, field)
                 st.markdown(f'<div class="score-badge">{resume_score}/100</div>', unsafe_allow_html=True)
                 st.image(ICON_FEEDBACK, width=32)
@@ -1369,6 +1516,20 @@ if uploaded_files:
                     for tip in tips:
                         st.markdown(f'<div class="suggestion-card">💡 {tip}</div>', unsafe_allow_html=True)
                 
+=======
+                tscore = template_score(text, info)
+                cscore = clarity_score(text)
+                resume_score = min(100, tscore + cscore)
+                st.subheader(f"📊 Resume Score: {resume_score}/100")
+                st.image(ICON_FEEDBACK, width=32)
+                st.progress(resume_score)
+                if resume_score >= 80:
+                    st.success("Great job! Your resume is strong.")
+                elif resume_score >= 60:
+                    st.info("Good resume, but there are areas to improve.")
+                else:
+                    st.warning("Consider improving your resume for better results.")
+>>>>>>> 1a206628 (Initial commit)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # --- Strengths & Areas for Improvement Block ---
@@ -1392,6 +1553,7 @@ if uploaded_files:
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # --- Missing Skills & Recommended Courses Block ---
+<<<<<<< HEAD
             with st.expander("✅ Missing Skills & Recommended Courses", expanded=False):
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
                 st.image(ICON_SKILLS, width=32)
@@ -1419,18 +1581,51 @@ if uploaded_files:
                 for cert in info['certifications']:
                     if certs_shown >= cert_count:
                         break
+=======
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("✅ Missing Skills & Recommended Courses:")
+                st.image(ICON_SKILLS, width=32)
+                for skill in IDEAL_SKILLS:
+                    if skill in [sk.lower() for sk in info['skills']]:
+                        st.markdown(f"{skill.title()} – Already present ✅")
+                    else:
+                        course = next((c for c in sum(COURSES.values(), []) if skill in c.lower()), None)
+                        if course:
+                            st.markdown(f"{skill.title()} – Missing -> Take '{course}' ✔️")
+                        else:
+                            st.markdown(f"{skill.title()} – Missing")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # --- Certifications Block ---
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("📚 Certifications to Include or Remove:")
+                st.image(ICON_CERT, width=32)
+                for cert in info['certifications']:
+>>>>>>> 1a206628 (Initial commit)
                     if any(p in cert.lower() for p in CERT_PROVIDERS):
                         st.markdown(f"'{cert}' – Should keep")
                     else:
                         st.markdown(f"'{cert}' – Remove (irrelevant to tech roles)")
+<<<<<<< HEAD
                     certs_shown += 1
                 for cert in [p.title() for p in CERTIFICATIONS.get(field, []) if not any(p in c.lower() for c in info['certifications'])][:cert_count-certs_shown]:
+=======
+                for cert in [p.title() for p in CERT_PROVIDERS if not any(p in c.lower() for c in info['certifications'])]:
+>>>>>>> 1a206628 (Initial commit)
                     st.markdown(f"'{cert}' – Add if completed")
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # --- Project Ideas Block ---
+<<<<<<< HEAD
             with st.expander("🛠 Project Ideas to Add", expanded=False):
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+=======
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("🛠️ Project Ideas to Add:")
+>>>>>>> 1a206628 (Initial commit)
                 st.image(ICON_PROJECT, width=32)
                 suggested_projects = [p for p in PROJECT_IDEAS.get(field, []) if p.lower() not in text.lower()]
                 extra_projects = [
@@ -1438,20 +1633,31 @@ if uploaded_files:
                     "Movie recommendation engine with Python + ML",
                     "Portfolio website using HTML/CSS/JS"
                 ]
+<<<<<<< HEAD
                 all_projects = suggested_projects + extra_projects
                 for proj in all_projects[:proj_count]:
+=======
+                for proj in suggested_projects + extra_projects:
+>>>>>>> 1a206628 (Initial commit)
                     st.markdown(f"- {proj}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
             # --- Final Suggestions Block ---
+<<<<<<< HEAD
             with st.expander("🎯 Final Suggestions", expanded=False):
                 st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+=======
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("🎯 Final Suggestions:")
+>>>>>>> 1a206628 (Initial commit)
                 st.image(ICON_SUGGEST, width=32)
                 if info['linkedin'] == 'Not found':
                     st.markdown("Add LinkedIn URL")
                 st.markdown("Use bullet metrics like 'Reduced process time by 30%'")
                 if 'certifications' not in text.lower():
                     st.markdown("Include a 'Certifications' section")
+<<<<<<< HEAD
                 st.markdown("✅ Add a section explicitly titled 'Objective' or 'Career Objective'")
                 st.markdown("✅ Use labeled sections for LinkedIn, GitHub, Phone, etc.")
                 st.markdown("✅ Include more common tools/skills in data science: e.g., SQL, PowerBI, scikit-learn, etc.")
@@ -1467,11 +1673,24 @@ if uploaded_files:
                 st.write(f"{YOUTUBE_VIDEO['title']}")
                 st.write(YOUTUBE_VIDEO['summary'])
                 st.markdown(f"[▶ Watch here]({YOUTUBE_VIDEO['url']})")
+=======
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            # --- YouTube Video Block ---
+            with st.container():
+                st.markdown("<div class='st-section'>", unsafe_allow_html=True)
+                st.subheader("🎥 Bonus Video:")
+                st.image(ICON_VIDEO, width=32)
+                st.write(f"**{YOUTUBE_VIDEO['title']}**")
+                st.write(YOUTUBE_VIDEO['summary'])
+                st.markdown(f"[▶️ Watch here]({YOUTUBE_VIDEO['url']})")
+>>>>>>> 1a206628 (Initial commit)
                 st.markdown("</div>", unsafe_allow_html=True)
 
             st.success("✅ Analysis complete!")
             st.balloons()
             st.markdown("</div>", unsafe_allow_html=True)
+<<<<<<< HEAD
 
     # --- Summary Row (Dashboard Cards) ---
     if uploaded_files:
@@ -1505,3 +1724,5 @@ st.sidebar.markdown("""
 #### 🎨 Theme
 You can switch between dark and light mode from the Streamlit settings menu (top-right ☰ > Settings > Theme), or set a default in .streamlit/config.toml.
 """)
+=======
+>>>>>>> 1a206628 (Initial commit)
